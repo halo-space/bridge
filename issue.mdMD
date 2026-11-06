@@ -1,0 +1,91 @@
+# IDP 项目问题清单
+
+基于当前 `idp` crate 的代码、README、测试和宿主应用调用方式整理。当前测试主要覆盖成功路径，不能代表协议实现已经达到生产安全要求。
+
+## P0：优先修复
+
+### 1. Refresh Token 没有真正换发（已修复）
+
+`exchange_refresh_token` 现在校验 JWT 签名、过期时间、Token 类型、客户端归属和撤销状态，并执行 Refresh Token rotation，重新签发 Access Token 和 Refresh Token。用户状态仍由应用层在签发前提供。
+
+### 2. 授权码消费时机错误（已修复）
+
+`exchange_code` 现在先读取并完成全部校验，再通过 `KvStore::take` 完成最终消费，并检查消费值一致性。
+
+### 3. 公共客户端未强制使用 PKCE（已修复）
+
+授权请求和兑换流程现在都对公共客户端强制要求 PKCE，并由 `oidc::Pkce` 校验算法和值。
+
+### 4. 多租户隔离没有贯穿存储接口
+
+`ClientStore::find_client` 没有 `tenant_id`，`UserStore::find_by_id` 也没有租户参数。授权码虽然保存 `tenant_id`，但兑换过程没有使用它做隔离校验。
+
+需要让客户端、用户、授权码、Token、会话和外部身份绑定的查询与校验统一携带租户上下文。
+
+### 5. Access Token 与 Refresh Token 没有类型区分（已修复）
+
+Claims 现在包含 `kind`，`verify_token`、`verify_refresh` 和 `verify_id` 分别限制 Token 类型。
+
+### 6. OAuth 参数校验不完整（核心项已修复）
+
+当前缺少或不完整的校验包括：
+
+授权码兑换现在校验 `grant_type`、scope、严格 redirect URI、客户端 response type 和 PKCE。授权码会保存 OIDC `nonce`，由调用方在签发 ID Token 时传入 `TokenService::issue_id_token`。
+
+## P1：重要安全和功能问题
+
+### 7. Token 撤销没有接入 Token 验证
+
+虽然提供了 `revoke_token` 和 `is_token_revoked`，但 `TokenService::verify_token` 不会检查撤销状态。调用方如果漏掉额外检查，撤销机制就不会生效。
+
+### 8. Refresh Token 没有绑定客户端和用户状态
+
+刷新流程没有解析 Token，也没有验证客户端归属、用户是否仍启用、Token 是否过期、是否已使用或是否已撤销。
+
+### 9. KvStore 的原子消费语义没有写入契约（已修复）
+
+`KvStore` 现在要求调用方实现原子 `take_if` compare-and-delete。授权码、OTP、验证码和魔术链接均通过该接口完成单次消费。
+
+### 10. WebAuthn 需要做完整协议和并发审计（协议已接入，计数器契约已收紧）
+
+需要核查 RP ID hash、origin、challenge、attestation、sign counter 回退等验证是否完整。
+
+`Passkeys::update` 现在必须携带租户、旧计数器并返回条件更新结果。调用方仍需在返回 `false` 时按策略处理计数器回退或克隆风险。
+
+### 11. RSA 全局密钥管理存在部署风险
+
+需要确认 `RsaCrypto::global()` 的私钥来源、持久化方式、多实例共享方式和密钥轮换能力。若进程启动时随机生成，多副本部署会出现实例间无法互相解密的问题。
+
+### 12. 邮件和短信的静默降级可能掩盖生产故障
+
+未配置 SMTP 或短信通道时仍可能返回成功。生产环境应区分开发 Mock 和正式通道，配置缺失时明确失败并记录审计事件。
+
+### 13. 社交账号自动邮箱关联存在账号接管风险（已移出核心）
+
+Provider 现在只输出统一 `Identity`，不再查询、绑定或维护本地账号。邮箱关联和确认流程由应用层负责。
+
+### 14. 审计接口缺少可靠性和一致性约束
+
+需要明确审计写入失败是否阻断认证、事件是否幂等、是否带唯一 ID、租户 ID、请求追踪 ID，以及是否需要防篡改保护。
+
+## P2：工程质量和可维护性
+
+### 15. 密钥配置没有安全约束
+
+HS256 secret 没有最小长度、熵和默认值检查，也没有 `kid` 和密钥轮换机制。
+
+### 16. 测试缺少关键失败和并发场景
+
+应增加以下测试：授权码并发兑换、错误参数抢先消费、公共客户端无 PKCE、Refresh Token 过期和撤销、跨租户访问、scope 越权、nonce 重放、redirect URI 差异、WebAuthn 计数器回退、审计失败和 KvStore 原子性。
+
+### 17. README 的功能描述超出当前实现的安全保证
+
+README 将项目描述为完整的 OIDC、WebAuthn、等保审计和零信任安全套件，但现有实现仍有上述协议和生命周期缺口。应在修复前标注实现边界，避免调用方把“模型和接口存在”误解为“生产安全能力已经完成”。
+
+## 建议修复顺序
+
+1. 先修复授权码消费、PKCE、redirect URI、scope 和多租户隔离。
+2. 完成 Refresh Token 生命周期、Token 类型和撤销校验。
+3. 审核 WebAuthn、RSA 密钥和社交账号绑定。
+4. 补齐 KvStore、审计接口和生产配置的契约。
+5. 增加失败路径、并发和跨租户集成测试。
