@@ -70,7 +70,7 @@ pub struct TotpBinding {
 
 /// 用户存储契约（由具体数据库如 PostgreSQL 实现）
 #[async_trait]
-pub trait UserStore: Send + Sync {
+pub trait Users: Send + Sync {
     async fn find_by_username(&self, tenant_id: i64, username: &str) -> Result<Option<AuthUser>>;
     async fn find_by_phone(&self, tenant_id: i64, phone: &str) -> Result<Option<AuthUser>>;
     async fn find_by_email(&self, tenant_id: i64, email: &str) -> Result<Option<AuthUser>>;
@@ -79,19 +79,19 @@ pub trait UserStore: Send + Sync {
 
 /// TOTP 绑定存储契约，由应用层实现具体持久化和 Secret 保护。
 #[async_trait]
-pub trait TotpStore: Send + Sync {
+pub trait Factors: Send + Sync {
     async fn find_totp(&self, tenant_id: i64, user_id: i64) -> Result<Option<TotpBinding>>;
 }
 
 /// OAuth 客户端应用存储契约
 #[async_trait]
-pub trait ClientStore: Send + Sync {
+pub trait Clients: Send + Sync {
     async fn find_client(&self, client_id: &str) -> Result<Option<OAuthClient>>;
 }
 
 /// 通用键值缓存存储契约 (由 Redis 实现，处理验证码/Token/临时凭证的原子读写与单次消费)
 #[async_trait]
-pub trait KvStore: Send + Sync {
+pub trait Secrets: Send + Sync {
     /// 存储值并设置超时时间 (秒)
     async fn set(&self, key: &str, val: &str, ttl: u64) -> Result<()>;
     /// 获取值
@@ -106,7 +106,7 @@ pub trait KvStore: Send + Sync {
 
 /// 频率限制存储契约。
 #[async_trait]
-pub trait RateStore: Send + Sync {
+pub trait Limits: Send + Sync {
     async fn allow(&self, key: &str, limit: u32, window_secs: u64) -> Result<bool>;
 }
 
@@ -131,7 +131,7 @@ pub trait Passkeys: Send + Sync {
 
 /// 安全审计事件持久化存储契约
 #[async_trait]
-pub trait AuditStore: Send + Sync {
+pub trait Events: Send + Sync {
     /// 记录单条安全审计事件
     async fn record_event(&self, event: &AuditEvent) -> Result<()>;
 }

@@ -6,7 +6,7 @@ pub mod slider;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{IdpError, Result};
-use crate::store::KvStore;
+use crate::store::Secrets;
 
 pub use click::{ClickCaptcha, TargetPoint};
 pub use image::ImageCaptcha;
@@ -69,7 +69,7 @@ impl CaptchaVerifier {
         }
     }
 
-    pub async fn verify<K: KvStore>(&self, kv: &K, req: &CaptchaVerifyReq) -> Result<String> {
+    pub async fn verify<K: Secrets>(&self, kv: &K, req: &CaptchaVerifyReq) -> Result<String> {
         let key = format!("cap:{}", req.id);
         let attempts_key = format!("cap:attempts:{}", req.id);
         let type_key = format!("cap:type:{}", req.id);
@@ -130,7 +130,7 @@ impl CaptchaVerifier {
         Ok(token)
     }
 
-    pub async fn token<K: KvStore>(&self, kv: &K, token: &str) -> Result<bool> {
+    pub async fn token<K: Secrets>(&self, kv: &K, token: &str) -> Result<bool> {
         Ok(kv.take(&format!("cpt:{token}")).await?.is_some())
     }
 }

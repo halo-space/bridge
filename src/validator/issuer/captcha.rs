@@ -1,5 +1,5 @@
 use crate::error::{IdpError, Result};
-use crate::store::KvStore;
+use crate::store::Secrets;
 use crate::validator::verifier::captcha::{
     CaptchaChallenge, CaptchaType, ClickCaptcha, ImageCaptcha, RotateCaptcha, SliderCaptcha,
 };
@@ -20,7 +20,7 @@ impl CaptchaIssuer {
         Self { ttl_seconds }
     }
 
-    pub async fn issue<K: KvStore>(
+    pub async fn issue<K: Secrets>(
         &self,
         kv: &K,
         captcha_type: CaptchaType,

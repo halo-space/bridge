@@ -6,8 +6,8 @@
 
 - [x] 移除 `AuthUser` 中的角色和权限字段
 - [x] 明确认证结果和身份资料模型
-- [x] 移除 UserStore 的外部身份查询和绑定职责
-- [x] 收敛 UserStore、TotpStore、Passkeys 的职责
+- [x] 移除 Users 的外部身份查询和绑定职责
+- [x] 收敛 Users、Factors、Passkeys 的职责
 - [x] 移除社交 Provider 内的本地账号查询和绑定逻辑
 
 ## 阶段二：身份源统一
@@ -27,7 +27,7 @@
 - [x] 完成验证码失败次数和上限
 - [x] 完成验证码单次消费接口
 - [x] 绑定验证码类型并保证成功校验的原子单次消费
-- [x] 将 `KvStore` 原子 compare-and-delete 纳入必需存储契约
+- [x] 将 `Secrets` 原子 compare-and-delete 纳入必需存储契约
 - [x] 完成 TOTP 和恢复码的签发与校验
 - [x] 完成 Magic Link 的签发与校验拆分
 - [x] 提供 Magic Link 的外部存储登记和单次消费接口

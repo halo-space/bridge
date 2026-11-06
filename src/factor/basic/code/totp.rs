@@ -1,5 +1,5 @@
 use crate::error::{IdpError, Result};
-use crate::store::{AuthUser, TotpStore, UserStore};
+use crate::store::{AuthUser, Factors, Users};
 use crate::types::{AuthResult, Level, Method};
 use crate::validator::verifier::totp::Totp;
 
@@ -7,7 +7,7 @@ use crate::validator::verifier::totp::Totp;
 pub struct TotpCode;
 
 impl TotpCode {
-    pub async fn result<U: UserStore, T: TotpStore>(
+    pub async fn result<U: Users, T: Factors>(
         user_store: &U,
         totp_store: &T,
         tenant_id: i64,
@@ -24,7 +24,7 @@ impl TotpCode {
         ))
     }
 
-    pub async fn authenticate<U: UserStore, T: TotpStore>(
+    pub async fn authenticate<U: Users, T: Factors>(
         user_store: &U,
         totp_store: &T,
         tenant_id: i64,

@@ -39,9 +39,7 @@ pub use pkg::rsa::RsaCrypto;
 pub use pkg::totp::Totp;
 pub use risk::{RiskAssessment, RiskConfig, RiskDecision, RiskEngine, UserHistory};
 pub use rules::{LockoutDecision, LockoutPolicy, PasswordPolicy, PasswordStrength, Reauth, Rules};
-pub use store::{
-    AuditStore, ClientStore, KvStore, Passkeys, RateStore, TotpBinding, TotpStore, UserStore,
-};
+pub use store::{Clients, Events, Factors, Limits, Passkeys, Secrets, TotpBinding, Users};
 pub use types::{AuthResult, Identity, Level, Method};
 pub use validator::issuer::{CaptchaIssuer, CodeIssuer, RecoveryIssuer, Scene, TotpIssuer};
 pub use validator::sender::{NotificationService, NotifyChannel};

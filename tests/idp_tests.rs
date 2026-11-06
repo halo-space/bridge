@@ -4,7 +4,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use bridge::factor::basic::magic::{MagicLinkConfig, MagicLinkService};
 use bridge::factor::passkey::Passkey;
 use bridge::pkg::password::{Password, PasswordAlgorithm};
-use bridge::store::{ClientStore, KvStore, OAuthClient, Passkeys};
+use bridge::store::{Clients, OAuthClient, Passkeys, Secrets};
 use bridge::validator::issuer::CaptchaIssuer;
 use bridge::validator::verifier::captcha::{
     CaptchaType, CaptchaVerifier, CaptchaVerifyReq, ClickCaptcha, ImageCaptcha, RotateCaptcha,
@@ -18,9 +18,11 @@ use std::sync::{Arc, Mutex};
 #[test]
 fn test_password_hash_and_verify() {
     let raw = "admin123";
-    let hash =
-        bridge::pkg::password::Password::hash(raw, bridge::pkg::password::PasswordAlgorithm::Argon2id)
-            .expect("hash failed");
+    let hash = bridge::pkg::password::Password::hash(
+        raw,
+        bridge::pkg::password::PasswordAlgorithm::Argon2id,
+    )
+    .expect("hash failed");
     assert!(
         bridge::pkg::password::Password::verify(
             raw,
@@ -380,7 +382,7 @@ fn test_captcha_units() {
     assert!(!ClickCaptcha::verify(&targets, &wrong_clicks));
 }
 
-// 内存模拟 KvStore
+// 内存模拟 Secrets
 struct MemKvStore {
     data: Mutex<HashMap<String, String>>,
 }
@@ -394,7 +396,7 @@ struct MemPasskeys {
 }
 
 #[async_trait]
-impl ClientStore for MemClientStore {
+impl Clients for MemClientStore {
     async fn find_client(&self, client_id: &str) -> bridge::Result<Option<OAuthClient>> {
         Ok((self.client.client_id == client_id).then(|| self.client.clone()))
     }
@@ -480,7 +482,7 @@ impl MemKvStore {
 }
 
 #[async_trait]
-impl KvStore for MemKvStore {
+impl Secrets for MemKvStore {
     async fn set(&self, key: &str, val: &str, _ttl: u64) -> bridge::Result<()> {
         self.data
             .lock()
@@ -877,7 +879,10 @@ fn test_lockout_policy() {
     let policy = bridge::rules::LockoutPolicy::default();
 
     // 0 次失败允许登录
-    assert_eq!(policy.evaluate(0, None), bridge::rules::LockoutDecision::Allow);
+    assert_eq!(
+        policy.evaluate(0, None),
+        bridge::rules::LockoutDecision::Allow
+    );
 
     // 3 次失败触发验证码
     assert_eq!(
@@ -924,7 +929,9 @@ fn test_totp_and_recovery_codes() {
     assert_eq!(consumed_hash, hashes[0]);
 
     // 错误恢复码拦截
-    assert!(bridge::pkg::recovery::RecoveryCode::verify_and_consume("INVALID-CODE", &hashes).is_err());
+    assert!(
+        bridge::pkg::recovery::RecoveryCode::verify_and_consume("INVALID-CODE", &hashes).is_err()
+    );
 
     // 4. 用户专属 Salt 强绑定派生测试
     let user_id = 3000000000000001;
@@ -952,8 +959,12 @@ fn test_totp_and_recovery_codes() {
 
 #[test]
 fn test_custom_claims_token_injection() {
-    let service =
-        bridge::token::TokenService::new("my-32-byte-secret-key-1234567890", "halo-idp", 3600, 86400);
+    let service = bridge::token::TokenService::new(
+        "my-32-byte-secret-key-1234567890",
+        "halo-idp",
+        3600,
+        86400,
+    );
     let user = bridge::store::AuthUser {
         id: 20001,
         tenant_id: 1000000000000001,

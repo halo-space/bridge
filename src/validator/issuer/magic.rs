@@ -1,6 +1,6 @@
 use crate::error::Result;
 use crate::factor::basic::magic::{MagicLinkConfig, MagicLinkService};
-use crate::store::KvStore;
+use crate::store::Secrets;
 
 pub struct Magic;
 
@@ -14,7 +14,7 @@ impl Magic {
         MagicLinkService::new(config).create_magic_link(email, user_id, scene, None)
     }
 
-    pub async fn create<K: KvStore>(
+    pub async fn create<K: Secrets>(
         config: MagicLinkConfig,
         kv: &K,
         email: &str,

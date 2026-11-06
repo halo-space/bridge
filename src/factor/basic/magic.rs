@@ -1,5 +1,5 @@
 use crate::error::{IdpError, Result};
-use crate::store::KvStore;
+use crate::store::Secrets;
 use base64::Engine;
 use base64::prelude::BASE64_URL_SAFE_NO_PAD;
 use hmac::{Hmac, Mac};
@@ -170,7 +170,7 @@ impl MagicLinkService {
     }
 
     /// 将魔术链接登记到外部存储，供后续单次消费。
-    pub async fn create<K: KvStore>(
+    pub async fn create<K: Secrets>(
         &self,
         kv: &K,
         email: &str,
@@ -187,7 +187,7 @@ impl MagicLinkService {
     }
 
     /// 校验并原子消费魔术链接，避免同一链接被重复使用。
-    pub async fn take<K: KvStore>(&self, kv: &K, token: &str) -> Result<MagicLinkPayload> {
+    pub async fn take<K: Secrets>(&self, kv: &K, token: &str) -> Result<MagicLinkPayload> {
         let payload = self.verify_token(token)?;
         let key = format!("magic:{}", payload.jti);
         if !kv.take_if(&key, token).await? {

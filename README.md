@@ -39,7 +39,7 @@ verifier    校验用户提交的验证码、TOTP、恢复码、Passkey 等材�
 
 1. **零数据库耦合 (Trait-driven Architecture)**
    - `bridge` 为纯领域逻辑与协议层，不绑定 PostgreSQL、MySQL 或任何特定 ORM。
-   - 所有数据持久化、多租户检索、凭证读取与缓存核销通过 `store.rs` 中的异步 Trait（`UserStore`、`TotpStore`、`ClientStore`、`KvStore`、`RateStore`、`Passkeys`、`AuditStore`）抽象，由宿主应用按需注入实现。
+   - 所有数据持久化、多租户检索、凭证读取与缓存核销通过 `store.rs` 中的异步 Trait（`Users`、`Factors`、`Clients`、`Secrets`、`Limits`、`Passkeys`、`Events`）抽象，由宿主应用按需注入实现。
 
 2. **多租户隔离可注入 (Multi-tenant Ready)**
    - 用户、TOTP、Passkey 和审计接口携带租户上下文；其他数据的租户边界由宿主应用在 Store 实现中约束。
@@ -183,12 +183,12 @@ src/
 宿主应用只需针对持久化层实现对应 Trait 即可插拔运行：
 
 ```rust
-pub trait UserStore: Send + Sync { ... }     // 由调用方提供的认证身份和凭证读取接口
-pub trait ClientStore: Send + Sync { ... }   // OAuth2 / OIDC 应用凭据
-pub trait KvStore: Send + Sync { ... }       // 验证码、Token、单次凭证原子消费
+pub trait Users: Send + Sync { ... }     // 由调用方提供的认证身份和凭证读取接口
+pub trait Clients: Send + Sync { ... }   // OAuth2 / OIDC 应用凭据
+pub trait Secrets: Send + Sync { ... }       // 验证码、Token、单次凭证原子消费
 pub trait Passkeys: Send + Sync { ... }  // FIDO2 / Passkey 持久化与计数器更新
-pub trait TotpStore: Send + Sync { ... }     // TOTP Secret 绑定
-pub trait AuditStore: Send + Sync { ... }    // 安全事件日志持久化
+pub trait Factors: Send + Sync { ... }     // TOTP Secret 绑定
+pub trait Events: Send + Sync { ... }    // 安全事件日志持久化
 ```
 
 ---
@@ -225,7 +225,7 @@ cargo test -p idp
 
 ### 1. 认证材料生命周期
 
-所有认证材料都需要具备统一的生命周期：创建、保存、过期、失败次数、单次消费、撤销和审计引用。魔术链接使用 `MagicLinkService::create` 写入调用方的 `KvStore`，再用 `take` 原子消费。无存储的 `create_magic_link` 和 `verify_token` 仅适合签名校验，不提供单次消费保证。
+所有认证材料都需要具备统一的生命周期：创建、保存、过期、失败次数、单次消费、撤销和审计引用。魔术链接使用 `MagicLinkService::create` 写入调用方的 `Secrets`，再用 `take` 原子消费。无存储的 `create_magic_link` 和 `verify_token` 仅适合签名校验，不提供单次消费保证。
 
 适用对象包括图形验证码、滑块验证码、旋转验证码、点选验证码、短信验证码、邮箱验证码、TOTP Secret、恢复码、Magic Link 和 Passkey / WebAuthn Challenge。
 

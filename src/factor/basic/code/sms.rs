@@ -1,5 +1,5 @@
 use crate::error::{IdpError, Result};
-use crate::store::{AuthUser, KvStore, UserStore};
+use crate::store::{AuthUser, Secrets, Users};
 use crate::types::{AuthResult, Level, Method};
 use crate::validator::issuer::CodeIssuer;
 use crate::validator::verifier::passcode::Passcode;
@@ -8,7 +8,7 @@ use crate::validator::verifier::passcode::Passcode;
 pub struct SmsCode;
 
 impl SmsCode {
-    pub async fn result<U: UserStore, K: KvStore>(
+    pub async fn result<U: Users, K: Secrets>(
         user_store: &U,
         kv: &K,
         tenant_id: i64,
@@ -21,7 +21,7 @@ impl SmsCode {
 
     pub const SCENE: &'static str = "login_sms";
 
-    pub async fn authenticate<U: UserStore, K: KvStore>(
+    pub async fn authenticate<U: Users, K: Secrets>(
         user_store: &U,
         kv: &K,
         tenant_id: i64,

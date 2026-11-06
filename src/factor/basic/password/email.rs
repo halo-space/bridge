@@ -1,13 +1,13 @@
 use crate::error::{IdpError, Result};
 use crate::pkg::password::Password;
-use crate::store::{AuthUser, UserStore};
+use crate::store::{AuthUser, Users};
 use crate::types::{AuthResult, Level, Method};
 
 /// 邮箱 + 密码登录。
 pub struct EmailPassword;
 
 impl EmailPassword {
-    pub async fn result<S: UserStore>(
+    pub async fn result<S: Users>(
         store: &S,
         tenant_id: i64,
         email: &str,
@@ -21,7 +21,7 @@ impl EmailPassword {
         ))
     }
 
-    pub async fn authenticate<S: UserStore>(
+    pub async fn authenticate<S: Users>(
         store: &S,
         tenant_id: i64,
         email: &str,

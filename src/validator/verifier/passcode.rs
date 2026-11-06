@@ -1,6 +1,6 @@
 use super::same;
 use crate::error::{IdpError, Result};
-use crate::store::KvStore;
+use crate::store::Secrets;
 
 /// 一次性验证码校验。
 pub struct Passcode;
@@ -10,7 +10,7 @@ impl Passcode {
         same(expected.trim(), actual.trim())
     }
 
-    pub async fn take<K: KvStore>(kv: &K, key: &str, actual: &str) -> Result<()> {
+    pub async fn take<K: Secrets>(kv: &K, key: &str, actual: &str) -> Result<()> {
         let expected = kv
             .get(key)
             .await?

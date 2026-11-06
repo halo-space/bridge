@@ -1,6 +1,6 @@
 use super::pkce::Pkce;
 use crate::error::{IdpError, Result};
-use crate::store::{AuthCode, ClientStore, KvStore, OAuthClient};
+use crate::store::{AuthCode, Clients, OAuthClient, Secrets};
 use crate::token::TokenService;
 use serde::{Deserialize, Serialize};
 
@@ -36,7 +36,7 @@ impl OidcFlow {
     }
 
     /// 校验授权请求参数及客户端合法性
-    pub async fn validate_authorize_request<C: ClientStore>(
+    pub async fn validate_authorize_request<C: Clients>(
         client_store: &C,
         req: &AuthorizeRequest,
     ) -> Result<OAuthClient> {
@@ -111,7 +111,7 @@ impl OidcFlow {
     }
 
     /// 生成授权码并存入缓存
-    pub async fn issue_code<K: KvStore>(
+    pub async fn issue_code<K: Secrets>(
         kv: &K,
         client_id: &str,
         user_id: i64,
@@ -138,7 +138,7 @@ impl OidcFlow {
     }
 
     /// 生成带 OIDC nonce 的授权码。
-    pub async fn issue_code_with_nonce<K: KvStore>(
+    pub async fn issue_code_with_nonce<K: Secrets>(
         kv: &K,
         client_id: &str,
         user_id: i64,
@@ -173,7 +173,7 @@ impl OidcFlow {
     }
 
     /// 授权码换 Token 校验（单次使用消费 + PKCE 校验 + Client 密钥校验）
-    pub async fn exchange_code<CS: ClientStore, K: KvStore>(
+    pub async fn exchange_code<CS: Clients, K: Secrets>(
         client_store: &CS,
         kv: &K,
         req: &TokenRequest,
@@ -238,7 +238,7 @@ impl OidcFlow {
     }
 
     /// 校验并处理 Refresh Token 换发 (grant_type=refresh_token)
-    pub async fn exchange_refresh_token<C: ClientStore, K: KvStore>(
+    pub async fn exchange_refresh_token<C: Clients, K: Secrets>(
         client_store: &C,
         token_service: &TokenService,
         kv: &K,
@@ -300,13 +300,13 @@ impl OidcFlow {
     }
 
     /// 撤销 Token (RFC 7009 Token Revocation)
-    pub async fn revoke_token<K: KvStore>(kv: &K, token: &str, ttl_secs: u64) -> Result<()> {
+    pub async fn revoke_token<K: Secrets>(kv: &K, token: &str, ttl_secs: u64) -> Result<()> {
         let key = format!("token:revoked:{}", token);
         kv.set(&key, "1", ttl_secs).await
     }
 
     /// 检查 Token 是否已被撤销
-    pub async fn is_token_revoked<K: KvStore>(kv: &K, token: &str) -> Result<bool> {
+    pub async fn is_token_revoked<K: Secrets>(kv: &K, token: &str) -> Result<bool> {
         let key = format!("token:revoked:{}", token);
         let val = kv.get(&key).await?;
         Ok(val.is_some())

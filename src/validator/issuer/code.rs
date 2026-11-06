@@ -1,7 +1,7 @@
 use rand_core::{OsRng, RngCore};
 
 use crate::error::Result;
-use crate::store::{KvStore, RateStore};
+use crate::store::{Limits, Secrets};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Scene {
@@ -46,13 +46,13 @@ impl CodeIssuer {
         format!("{value:0width$}", width = digits)
     }
 
-    pub async fn issue<K: KvStore>(kv: &K, key: &str, ttl: u64, digits: usize) -> Result<String> {
+    pub async fn issue<K: Secrets>(kv: &K, key: &str, ttl: u64, digits: usize) -> Result<String> {
         let code = Self::code(digits);
         kv.set(key, &code, ttl).await?;
         Ok(code)
     }
 
-    pub async fn issue_with_rate<K: KvStore, R: RateStore>(
+    pub async fn issue_with_rate<K: Secrets, R: Limits>(
         kv: &K,
         rate: &R,
         key: &str,
@@ -70,7 +70,7 @@ impl CodeIssuer {
         Self::issue(kv, key, ttl, digits).await
     }
 
-    pub async fn issue_scene_with_rate<K: KvStore, R: RateStore>(
+    pub async fn issue_scene_with_rate<K: Secrets, R: Limits>(
         kv: &K,
         rate: &R,
         scene: Scene,

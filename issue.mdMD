@@ -10,7 +10,7 @@
 
 ### 2. 授权码消费时机错误（已修复）
 
-`exchange_code` 现在先读取并完成全部校验，再通过 `KvStore::take` 完成最终消费，并检查消费值一致性。
+`exchange_code` 现在先读取并完成全部校验，再通过 `Secrets::take` 完成最终消费，并检查消费值一致性。
 
 ### 3. 公共客户端未强制使用 PKCE（已修复）
 
@@ -18,7 +18,7 @@
 
 ### 4. 多租户隔离没有贯穿存储接口
 
-`ClientStore::find_client` 没有 `tenant_id`，`UserStore::find_by_id` 也没有租户参数。授权码虽然保存 `tenant_id`，但兑换过程没有使用它做隔离校验。
+`Clients::find_client` 没有 `tenant_id`，`Users::find_by_id` 也没有租户参数。授权码虽然保存 `tenant_id`，但兑换过程没有使用它做隔离校验。
 
 需要让客户端、用户、授权码、Token、会话和外部身份绑定的查询与校验统一携带租户上下文。
 
@@ -42,9 +42,9 @@ Claims 现在包含 `kind`，`verify_token`、`verify_refresh` 和 `verify_id` �
 
 刷新流程没有解析 Token，也没有验证客户端归属、用户是否仍启用、Token 是否过期、是否已使用或是否已撤销。
 
-### 9. KvStore 的原子消费语义没有写入契约（已修复）
+### 9. Secrets 的原子消费语义没有写入契约（已修复）
 
-`KvStore` 现在要求调用方实现原子 `take_if` compare-and-delete。授权码、OTP、验证码和魔术链接均通过该接口完成单次消费。
+`Secrets` 现在要求调用方实现原子 `take_if` compare-and-delete。授权码、OTP、验证码和魔术链接均通过该接口完成单次消费。
 
 ### 10. WebAuthn 需要做完整协议和并发审计（协议已接入，计数器契约已收紧）
 
@@ -76,7 +76,7 @@ HS256 secret 没有最小长度、熵和默认值检查，也没有 `kid` 和密
 
 ### 16. 测试缺少关键失败和并发场景
 
-应增加以下测试：授权码并发兑换、错误参数抢先消费、公共客户端无 PKCE、Refresh Token 过期和撤销、跨租户访问、scope 越权、nonce 重放、redirect URI 差异、WebAuthn 计数器回退、审计失败和 KvStore 原子性。
+应增加以下测试：授权码并发兑换、错误参数抢先消费、公共客户端无 PKCE、Refresh Token 过期和撤销、跨租户访问、scope 越权、nonce 重放、redirect URI 差异、WebAuthn 计数器回退、审计失败和 Secrets 原子性。
 
 ### 17. README 的功能描述超出当前实现的安全保证
 
@@ -87,5 +87,5 @@ README 将项目描述为完整的 OIDC、WebAuthn、等保审计和零信任安
 1. 先修复授权码消费、PKCE、redirect URI、scope 和多租户隔离。
 2. 完成 Refresh Token 生命周期、Token 类型和撤销校验。
 3. 审核 WebAuthn、RSA 密钥和社交账号绑定。
-4. 补齐 KvStore、审计接口和生产配置的契约。
+4. 补齐 Secrets、审计接口和生产配置的契约。
 5. 增加失败路径、并发和跨租户集成测试。

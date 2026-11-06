@@ -1,6 +1,6 @@
 use crate::error::{IdpError, Result};
 use crate::store::AuthUser;
-use crate::store::KvStore;
+use crate::store::Secrets;
 use chrono::Utc;
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use serde::{Deserialize, Serialize};
@@ -209,7 +209,7 @@ impl TokenService {
         Ok(claims)
     }
 
-    pub async fn verify_live<K: KvStore>(&self, kv: &K, token: &str) -> Result<Claims> {
+    pub async fn verify_live<K: Secrets>(&self, kv: &K, token: &str) -> Result<Claims> {
         let claims = self.verify_token(token)?;
         if kv.get(&format!("token:revoked:{token}")).await?.is_some() {
             return Err(IdpError::TokenError("Token revoked".into()));
