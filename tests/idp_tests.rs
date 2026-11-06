@@ -383,11 +383,11 @@ fn test_captcha_units() {
 }
 
 // 内存模拟 Secrets
-struct MemKvStore {
+struct MemSecrets {
     data: Mutex<HashMap<String, String>>,
 }
 
-struct MemClientStore {
+struct MemClients {
     client: OAuthClient,
 }
 
@@ -396,7 +396,7 @@ struct MemPasskeys {
 }
 
 #[async_trait]
-impl Clients for MemClientStore {
+impl Clients for MemClients {
     async fn find_client(&self, client_id: &str) -> bridge::Result<Option<OAuthClient>> {
         Ok((self.client.client_id == client_id).then(|| self.client.clone()))
     }
@@ -473,7 +473,7 @@ impl Passkeys for MemPasskeys {
     }
 }
 
-impl MemKvStore {
+impl MemSecrets {
     fn new() -> Self {
         Self {
             data: Mutex::new(HashMap::new()),
@@ -482,7 +482,7 @@ impl MemKvStore {
 }
 
 #[async_trait]
-impl Secrets for MemKvStore {
+impl Secrets for MemSecrets {
     async fn set(&self, key: &str, val: &str, _ttl: u64) -> bridge::Result<()> {
         self.data
             .lock()
@@ -584,7 +584,7 @@ fn test_passkey_state_and_missing_data() {
 
 #[tokio::test]
 async fn test_captcha_service_flow() {
-    let kv = MemKvStore::new();
+    let kv = MemSecrets::new();
     let issuer = CaptchaIssuer::default();
     let verifier = CaptchaVerifier::default();
 
@@ -665,7 +665,7 @@ async fn test_captcha_service_flow() {
 
 #[tokio::test]
 async fn test_magic_link_single_use() {
-    let kv = MemKvStore::new();
+    let kv = MemSecrets::new();
     let service = MagicLinkService::new(MagicLinkConfig {
         base_url: "https://auth.halo.local/magic".into(),
         signing_secret: "a-long-test-secret-for-magic-links".into(),
@@ -682,9 +682,9 @@ async fn test_magic_link_single_use() {
 
 #[tokio::test]
 async fn test_oidc_code_keeps_nonce_and_survives_failed_pkce() {
-    let kv = MemKvStore::new();
+    let kv = MemSecrets::new();
     let (verifier, challenge) = oidc::Pkce::new();
-    let clients = MemClientStore {
+    let clients = MemClients {
         client: OAuthClient {
             client_id: "web".into(),
             client_secret: None,
@@ -791,8 +791,8 @@ async fn test_oidc_code_keeps_nonce_and_survives_failed_pkce() {
 
 #[tokio::test]
 async fn test_oidc_refresh_rotates_and_revokes_old_token() {
-    let kv = MemKvStore::new();
-    let clients = MemClientStore {
+    let kv = MemSecrets::new();
+    let clients = MemClients {
         client: OAuthClient {
             client_id: "web".into(),
             client_secret: None,
