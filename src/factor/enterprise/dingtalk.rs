@@ -11,11 +11,20 @@ pub struct DingtalkConfig {
 
 pub struct DingtalkProvider {
     config: DingtalkConfig,
+    endpoint: String,
 }
 
 impl DingtalkProvider {
     pub fn new(config: DingtalkConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            endpoint: "https://api.dingtalk.com".into(),
+        }
+    }
+
+    pub fn endpoint(mut self, endpoint: impl Into<String>) -> Self {
+        self.endpoint = endpoint.into();
+        self
     }
 
     /// 构造钉钉 OAuth2.0 统一登录授权链接
@@ -37,7 +46,10 @@ impl DingtalkProvider {
     /// 使用 authorization_code 向钉钉换取 userAccessToken 并拉取用户信息
     pub async fn exchange_code_for_user(&self, code: &str) -> Result<serde_json::Value> {
         let http = reqwest::Client::new();
-        let token_url = "https://api.dingtalk.com/v1.0/oauth2/userAccessToken";
+        let token_url = format!(
+            "{}/v1.0/oauth2/userAccessToken",
+            self.endpoint.trim_end_matches('/')
+        );
 
         let body = serde_json::json!({
             "clientId": self.config.client_id,
@@ -63,7 +75,10 @@ impl DingtalkProvider {
         })?;
 
         // 拉取用户信息
-        let user_url = "https://api.dingtalk.com/v1.0/contact/users/me";
+        let user_url = format!(
+            "{}/v1.0/contact/users/me",
+            self.endpoint.trim_end_matches('/')
+        );
         let user_resp = http
             .get(user_url)
             .header("x-acs-dingtalk-access-token", access_token)

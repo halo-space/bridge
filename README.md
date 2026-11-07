@@ -35,7 +35,7 @@ src/
 ├── token/                  # Claims、JWT 服务和 JWKS
 ├── rules/                  # 密码、锁定、重认证规则
 ├── pkg/                    # 密码、TOTP、恢复码、RSA 等算法
-├── pipeline.rs             # 统一登录前、中、后的节点状态机
+├── pipeline.rs             # 统一登录前、中、后的节点 DAG 和内置执行绑定
 ├── audit.rs                # 安全审计事件模型
 ├── risk.rs                 # 风险评分和阻断决策
 └── error.rs                # 统一错误类型
@@ -68,8 +68,8 @@ Bridge 不保存业务用户，也不执行账号绑定。Provider 只把第三�
 | OIDC Authorization Code | 已实现 | state、nonce、PKCE、scope、redirect URI、Refresh Token、撤销和用户状态检查 |
 | UserInfo、Introspection、隐式授权 | 边界已确定 | 不维护业务用户；调用方用 `verify_live` 组装 Introspection；只支持 Authorization Code + PKCE |
 | Passkey / WebAuthn | 已实现 | 注册、认证、状态标记、计数器 CAS、`last_used_at` 和真实协议 fixture 已覆盖；状态单次消费由调用方存储保证 |
-| Device | 待实现 | 当前只保留模块边界 |
-| Pipeline | 已实现 | 支持输入、检查、签发、校验、后置动作、Runner 执行器、路由分支、All/Any 汇聚、有限循环、上下文传递、重试、拒绝和暂停继续 |
+| Device | 已实现 | RSA-SHA256 nonce 证明、启停、时间窗口和 `Devices` 存储契约 |
+| Pipeline | 已实现 | 支持输入、检查、签发、发送、校验、审计、内置 `Services` 执行绑定、路由分支、All/Any 汇聚、有限循环、上下文传递、重试、拒绝和暂停继续 |
 | 风险决策和审计模型 | 已实现 | 由调用方负责持久化和策略接入 |
 
 ## 类型和存储
@@ -94,11 +94,16 @@ pub trait Clients { /* OAuth/OIDC 客户端读取 */ }
 pub trait Secrets { /* 临时材料和原子消费 */ }
 pub trait Factors { /* TOTP 绑定读取 */ }
 pub trait Passkeys { /* Passkey 保存、查询和计数器更新 */ }
+pub trait Devices { /* 设备保存、查询、更新和撤销 */ }
 pub trait Events { /* 审计事件写入 */ }
 pub trait Limits { /* 发送和验证频控 */ }
 ```
 
 `Passkeys::update` 使用旧计数器条件更新。调用方在返回失败时处理计数器回退或克隆风险。`Secrets::take_if` 必须由具体存储实现原子 compare-and-delete。
+
+Pipeline 的 `Services` 将节点绑定到现有能力：`Issue` 调用 `CodeIssuer` 或 WebAuthn，`Effect` 调用短信、邮件和审计，`Verify` 调用密码、验证码、短信验证码、邮箱验证码、TOTP、Passkey 和设备校验。调用方只提供存储契约和通道配置，不需要在每个节点里重新分派认证逻辑。
+
+用户输入通过 `Event::Input` 提交。`Pipeline::run` 自动推进可执行节点，遇到尚未提交的 `Input` 或 `Verify` 节点才返回 `Progress::Need`。
 
 ## 认证材料生命周期
 
@@ -130,11 +135,14 @@ cargo run --example pipeline_runner
 - `pipeline_graph`：风险分支、All 汇聚、Any 汇聚
 - `pipeline_runner`：调用方 Runner 执行节点
 
+基于内置能力的完整手机号验证码流程见 `tests/pipeline_services.rs`，覆盖滑块校验、验证码签发、短信发送、短信校验和审计写入。
+
 ## 验证
 
 ```bash
 cargo check
 cargo test
+cargo bench --bench pipeline
 ```
 
 当前测试覆盖基础认证材料、密码算法、Passkey 注册认证 fixture、存储契约和计数器 CAS、OIDC 失败路径、Token rotation、Provider 资料转换以及 SAML 签名、状态关联和重放。

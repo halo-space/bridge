@@ -8,18 +8,18 @@ WebAuthn 注册、认证、持久化读取、计数器 CAS、完整凭证状态�
 
 ## P2
 
-### Device 尚未实现
+### Device 已补齐，仍需应用层存储实现
 
-`factor/enterprise/device.rs` 当前只有模块占位，没有设备注册、密钥、撤销和认证流程。
+`factor/enterprise/device.rs` 已提供设备状态、RSA-SHA256 nonce 证明、启停和时间窗口校验；`store::Devices` 提供保存、查询、更新和撤销契约。具体设备数据仍由调用方实现存储。
 
 ### 审计流程接入不足
 
-RSA、发送通道和 Events 契约边界已补齐。认证流程尚未自动发出审计事件，应用层需要在认证入口调用 `Events::record_event`。
+Pipeline 内置 `Services` 已支持 `Effect("audit")` 自动调用 `Events::record_event`。非 Pipeline 认证入口仍由应用层显式记录事件。
 
 ## 文档和测试
 
 - README 已按当前目录和能力状态整理
-- Provider 的真实网络失败响应测试仍需补充
-- 每项已实现能力还没有完整覆盖成功和失败路径
+- Provider 网络失败测试已覆盖 GitHub、Google、微信、飞书、企业微信和钉钉；真实服务商业务错误响应仍由各 Provider 的错误字段解析负责。
+- Pipeline 的主要成功和失败路径已覆盖；新增能力仍按实际接入继续补充场景测试。
 
 应用层调用方迁移不属于当前 bridge 范围。

@@ -53,7 +53,7 @@
 - [x] 支持密码加 TOTP、社交加验证码、密码加 Passkey
 - [x] 保持 Pipeline 不管理 Session、权限和业务用户
 
-验收条件是 Pipeline 能表达输入、检查、签发、校验和后置动作，由调用方提供 Runner 执行具体能力，并通过可序列化运行状态输出下一步、路由分支、All/Any 汇聚、有限循环、重试、拒绝或完成结果。
+验收条件是 Pipeline 能表达输入、检查、签发、发送、校验和后置动作，由内置 `Services` 绑定现有 issuer、sender、verifier、factor 和 store，并通过可序列化运行状态输出下一步、路由分支、All/Any 汇聚、有限循环、重试、拒绝或完成结果。
 
 ## 阶段四：协议扩展
 
@@ -66,10 +66,10 @@
 
 ## 阶段五：企业设备因子
 
-- [ ] 定义 Device 的认证协议
-- [ ] 定义设备密钥和设备状态模型
-- [ ] 定义设备注册、撤销和校验接口
-- [ ] 决定 Device 是否进入 `factor/enterprise`
+- [x] 定义 Device 的认证协议
+- [x] 定义设备密钥和设备状态模型
+- [x] 定义设备注册、撤销和校验接口
+- [x] 决定 Device 是否进入 `factor/enterprise`
 
 ## 阶段六：安全审计
 
@@ -79,8 +79,18 @@
 - [x] 设计 RSA 密钥持久化和轮换契约
 - [x] 区分邮件短信 Mock 与生产发送失败
 - [x] 明确 Events 写入失败、幂等和追踪字段
-- [ ] 增加 Provider 网络错误和失败响应测试
+- [x] 增加 Provider 网络错误和失败响应测试
 - [x] 删除未导出的企业目录同步遗留代码
+
+## 阶段七：Pipeline 执行闭环
+
+- [x] 增加 `Event::Input`，区分原始输入和节点通过结果
+- [x] 增加 `Pipeline::run`，自动推进可执行节点
+- [x] 增加内置 `Services`，统一绑定 issuer、sender、verifier、factor 和 store
+- [x] 覆盖滑块、短信签发、短信发送、短信校验、TOTP、密码和审计流程
+- [x] 增加 Pipeline 基准程序和外部流程验证
+
+验收结果：滑块 → 验证码签发 → 短信发送 → 短信校验 → 审计、TOTP 和密码流程均已通过集成测试；Release 基准中 10,000 轮纯 Pipeline 状态推进约 5.97µs/轮。
 
 结论：`verify_token` 只做签名和 Claims 校验；需要实时状态的请求统一使用 `verify_live`。Refresh Token 换发通过 `Users` 检查租户、用户存在和 `is_active`，bridge 不维护用户数据。RSA 使用 `from_private_pem` 加载持久化密钥，`private_key_pem` 导出，`rotate` 显式轮换；全局生成只作为默认兼容入口。短信和邮件 sender 的 `strict` 模式用于生产失败闭环，关闭时保留开发 Mock 行为。Events 使用 `event.id` 幂等，并支持 trace/request 字段；写入失败由存储实现返回错误。
 

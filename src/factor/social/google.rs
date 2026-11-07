@@ -12,11 +12,20 @@ pub struct GoogleConfig {
 
 pub struct GoogleProvider {
     config: GoogleConfig,
+    endpoint: String,
 }
 
 impl GoogleProvider {
     pub fn new(config: GoogleConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            endpoint: "https://oauth2.googleapis.com".into(),
+        }
+    }
+
+    pub fn endpoint(mut self, endpoint: impl Into<String>) -> Self {
+        self.endpoint = endpoint.into();
+        self
     }
 
     /// 构造 Google OAuth2 授权跳转链接
@@ -72,7 +81,7 @@ impl GoogleProvider {
     ) -> Result<SocialProfile> {
         let http = reqwest::Client::new();
         let token_resp = http
-            .post("https://oauth2.googleapis.com/token")
+            .post(format!("{}/token", self.endpoint.trim_end_matches('/')))
             .form(&[
                 ("client_id", self.config.client_id.as_str()),
                 ("client_secret", self.config.client_secret.as_str()),

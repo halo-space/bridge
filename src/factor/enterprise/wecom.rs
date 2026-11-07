@@ -12,11 +12,20 @@ pub struct WecomConfig {
 
 pub struct WecomProvider {
     config: WecomConfig,
+    endpoint: String,
 }
 
 impl WecomProvider {
     pub fn new(config: WecomConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            endpoint: "https://qyapi.weixin.qq.com".into(),
+        }
+    }
+
+    pub fn endpoint(mut self, endpoint: impl Into<String>) -> Self {
+        self.endpoint = endpoint.into();
+        self
     }
 
     /// 构造企业微信 Web 扫码授权或企业微信内静默授权链接
@@ -39,8 +48,10 @@ impl WecomProvider {
 
         // 1. 获取 access_token
         let token_url = format!(
-            "https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid={}&corpsecret={}",
-            self.config.corp_id, self.config.corp_secret
+            "{}/cgi-bin/gettoken?corpid={}&corpsecret={}",
+            self.endpoint.trim_end_matches('/'),
+            self.config.corp_id,
+            self.config.corp_secret
         );
         let token_resp =
             http.get(&token_url).send().await.map_err(|e| {
@@ -61,8 +72,10 @@ impl WecomProvider {
 
         // 2. 根据 code 获取 user_info
         let user_url = format!(
-            "https://qyapi.weixin.qq.com/cgi-bin/auth/getuserinfo?access_token={}&code={}",
-            access_token, code
+            "{}/cgi-bin/auth/getuserinfo?access_token={}&code={}",
+            self.endpoint.trim_end_matches('/'),
+            access_token,
+            code
         );
         let user_resp = http
             .get(&user_url)

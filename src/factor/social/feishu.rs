@@ -11,11 +11,20 @@ pub struct FeishuConfig {
 
 pub struct FeishuProvider {
     config: FeishuConfig,
+    endpoint: String,
 }
 
 impl FeishuProvider {
     pub fn new(config: FeishuConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            endpoint: "https://open.feishu.cn".into(),
+        }
+    }
+
+    pub fn endpoint(mut self, endpoint: impl Into<String>) -> Self {
+        self.endpoint = endpoint.into();
+        self
     }
 
     /// 构造飞书网页登录跳转链接
@@ -72,7 +81,10 @@ impl FeishuProvider {
         let http = reqwest::Client::new();
 
         // 1. 获取 app_access_token
-        let app_token_url = "https://open.feishu.cn/open-apis/auth/v3/app_access_token/internal";
+        let app_token_url = format!(
+            "{}/open-apis/auth/v3/app_access_token/internal",
+            self.endpoint.trim_end_matches('/')
+        );
         let app_body = serde_json::json!({
             "app_id": self.config.app_id,
             "app_secret": self.config.app_secret,
@@ -95,7 +107,10 @@ impl FeishuProvider {
             .ok_or_else(|| IdpError::OAuthError("Missing Feishu app_access_token".into()))?;
 
         // 2. 换取 user_access_token
-        let user_token_url = "https://open.feishu.cn/open-apis/authen/v1/access_token";
+        let user_token_url = format!(
+            "{}/open-apis/authen/v1/access_token",
+            self.endpoint.trim_end_matches('/')
+        );
         let user_token_body = serde_json::json!({
             "grant_type": "authorization_code",
             "code": code,
@@ -122,7 +137,10 @@ impl FeishuProvider {
         })?;
 
         // 3. 拉取用户信息
-        let user_info_url = "https://open.feishu.cn/open-apis/authen/v1/user_info";
+        let user_info_url = format!(
+            "{}/open-apis/authen/v1/user_info",
+            self.endpoint.trim_end_matches('/')
+        );
         let user_resp = http
             .get(user_info_url)
             .header("Authorization", format!("Bearer {user_access_token}"))

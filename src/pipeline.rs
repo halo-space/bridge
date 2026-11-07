@@ -4,6 +4,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
+pub mod services;
+pub use services::Services;
+
 const DEFAULT_MAX_STEPS: u32 = 128;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -114,6 +117,8 @@ pub struct Evidence {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Event {
+    /// 用户提交当前输入节点或校验节点需要的原始数据。
+    Input { node: String, data: Value, at: i64 },
     Pass {
         node: String,
         routes: Vec<String>,
@@ -163,6 +168,9 @@ pub struct Run {
     pub steps: u32,
     #[serde(default)]
     pub denied: Option<(String, String)>,
+    /// 已经收到输入、等待内置执行器校验的节点。
+    #[serde(default)]
+    pub submitted: BTreeSet<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -262,6 +270,7 @@ impl Pipeline {
             visits: BTreeMap::new(),
             steps: 0,
             denied: None,
+            submitted: BTreeSet::new(),
         };
         self.schedule(&mut run, &self.start)?;
         let progress = self.advance(&mut run)?;
@@ -286,6 +295,35 @@ impl Pipeline {
         }
 
         match event {
+            Event::Input {
+                node: event_node,
+                data,
+                at,
+            } => {
+                self.check_node(&current, &event_node)?;
+                if !matches!(node.kind, Kind::Input | Kind::Verify(_)) {
+                    return Err(IdpError::AuthFailed(format!(
+                        "Pipeline node does not accept input: {current}"
+                    )));
+                }
+                run.context.data.insert(current.clone(), data.clone());
+                run.context.evidence.push(Evidence {
+                    node: current.clone(),
+                    at,
+                    data,
+                });
+                if matches!(node.kind, Kind::Verify(_)) {
+                    run.submitted.insert(current.clone());
+                    return Ok(self.need(&current));
+                }
+                let targets = self.targets(node, &[])?;
+                run.completed.insert(current.clone());
+                run.current = None;
+                for target in targets {
+                    self.arrive(run, &current, &target, false)?;
+                }
+                self.advance(run)
+            }
             Event::Pass {
                 node: event_node,
                 routes,
@@ -315,6 +353,7 @@ impl Pipeline {
                     at,
                     data,
                 });
+                run.submitted.remove(&current);
                 run.completed.insert(current.clone());
                 run.current = None;
                 for target in targets {
@@ -328,6 +367,7 @@ impl Pipeline {
                 retry,
             } => {
                 self.check_node(&current, &event_node)?;
+                run.submitted.remove(&current);
                 if retry {
                     let visits = run.visits.entry(current.clone()).or_default();
                     *visits = visits.saturating_add(1);
@@ -396,6 +436,45 @@ impl Pipeline {
         self.resume(run, event)
     }
 
+    /// 自动推进所有可以由执行器处理的节点。
+    ///
+    /// `Input` 和尚未收到数据的 `Verify` 节点会暂停并返回 `Need`；
+    /// `Check`、`Issue`、`Effect` 以及已经收到输入的 `Verify` 节点会继续执行。
+    pub async fn run<R: Runner>(&self, run: &mut Run, runner: &R) -> Result<Progress> {
+        loop {
+            let Some(current) = run.current.clone() else {
+                return self.advance(run);
+            };
+            let node = self
+                .nodes
+                .get(&current)
+                .ok_or_else(|| IdpError::Internal(format!("Pipeline node not found: {current}")))?;
+            let waiting = matches!(node.kind, Kind::Input)
+                || (matches!(node.kind, Kind::Verify(_))
+                    && !run.submitted.contains(&current)
+                    && !self.has_input(run, node));
+            if waiting {
+                return Ok(self.need(&current));
+            }
+            let progress = self.execute(run, runner).await?;
+            match progress {
+                Progress::Need { ref node, .. }
+                    if run.current.as_deref() == Some(node.as_str())
+                        && (matches!(self.nodes[node.as_str()].kind, Kind::Input)
+                            || (matches!(self.nodes[node.as_str()].kind, Kind::Verify(_))
+                                && !run.submitted.contains(node)
+                                && !self.has_input(run, &self.nodes[node.as_str()]))) =>
+                {
+                    return Ok(progress);
+                }
+                Progress::Done | Progress::Retry { .. } | Progress::Deny { .. } => {
+                    return Ok(progress);
+                }
+                Progress::Need { .. } => continue,
+            }
+        }
+    }
+
     fn advance(&self, run: &mut Run) -> Result<Progress> {
         if let Some((node, reason)) = run.denied.clone() {
             return Ok(Progress::Deny { node, reason });
@@ -433,6 +512,32 @@ impl Pipeline {
             kind,
             fields,
         }
+    }
+
+    fn has_input(&self, run: &Run, node: &Node) -> bool {
+        if run.context.data.contains_key(&node.id) {
+            return true;
+        }
+        let Kind::Verify(kind) = &node.kind else {
+            return false;
+        };
+        run.context.data.values().any(|value| {
+            if kind == "captcha" || kind.starts_with("captcha.") {
+                value.get("id").is_some() && value.get("captcha_type").is_some()
+            } else if kind == "passkey" || kind == "webauthn" {
+                value.get("input").is_some() || value.get("credential").is_some()
+            } else if kind == "device" {
+                value.get("signature").is_some() && value.get("device_id").is_some()
+            } else if kind == "password"
+                || kind == "account.password"
+                || kind == "email.password"
+                || kind == "phone.password"
+            {
+                value.get("password").is_some()
+            } else {
+                value.get("code").is_some()
+            }
+        })
     }
 
     fn schedule(&self, run: &mut Run, node_id: &str) -> Result<()> {

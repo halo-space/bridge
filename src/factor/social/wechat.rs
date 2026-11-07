@@ -12,11 +12,20 @@ pub struct WechatConfig {
 
 pub struct WechatProvider {
     config: WechatConfig,
+    endpoint: String,
 }
 
 impl WechatProvider {
     pub fn new(config: WechatConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            endpoint: "https://api.weixin.qq.com".into(),
+        }
+    }
+
+    pub fn endpoint(mut self, endpoint: impl Into<String>) -> Self {
+        self.endpoint = endpoint.into();
+        self
     }
 
     /// 构造微信扫码登录跳转链接 (PC 网站应用 snsapi_login)
@@ -62,8 +71,11 @@ impl WechatProvider {
     /// 使用 authorization_code 换取 access_token 并读取微信用户资料。
     pub async fn exchange_code_for_profile(&self, code: &str) -> Result<SocialProfile> {
         let http = reqwest::Client::new();
-        let mut token_url = Url::parse("https://api.weixin.qq.com/sns/oauth2/access_token")
-            .map_err(|e| IdpError::Internal(e.to_string()))?;
+        let mut token_url = Url::parse(&format!(
+            "{}/sns/oauth2/access_token",
+            self.endpoint.trim_end_matches('/')
+        ))
+        .map_err(|e| IdpError::Internal(e.to_string()))?;
         token_url
             .query_pairs_mut()
             .append_pair("appid", &self.config.app_id)
@@ -104,8 +116,11 @@ impl WechatProvider {
             .and_then(|value| value.as_str())
             .ok_or_else(|| IdpError::OAuthError("Missing WeChat openid".into()))?;
 
-        let mut user_url = Url::parse("https://api.weixin.qq.com/sns/userinfo")
-            .map_err(|e| IdpError::Internal(e.to_string()))?;
+        let mut user_url = Url::parse(&format!(
+            "{}/sns/userinfo",
+            self.endpoint.trim_end_matches('/')
+        ))
+        .map_err(|e| IdpError::Internal(e.to_string()))?;
         user_url
             .query_pairs_mut()
             .append_pair("access_token", access_token)

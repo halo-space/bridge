@@ -12,11 +12,20 @@ pub struct GithubConfig {
 
 pub struct GithubProvider {
     config: GithubConfig,
+    endpoint: String,
 }
 
 impl GithubProvider {
     pub fn new(config: GithubConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            endpoint: "https://github.com".into(),
+        }
+    }
+
+    pub fn endpoint(mut self, endpoint: impl Into<String>) -> Self {
+        self.endpoint = endpoint.into();
+        self
     }
 
     /// 构造 GitHub OAuth 授权重定向跳转 URL
@@ -73,7 +82,10 @@ impl GithubProvider {
         let http = reqwest::Client::new();
 
         // 1. 换取 access_token
-        let token_url = "https://github.com/login/oauth/access_token";
+        let token_url = format!(
+            "{}/login/oauth/access_token",
+            self.endpoint.trim_end_matches('/')
+        );
         let params = [
             ("client_id", self.config.client_id.as_str()),
             ("client_secret", self.config.client_secret.as_str()),

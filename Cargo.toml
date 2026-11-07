@@ -1,6 +1,6 @@
 [package]
 name = "halo-bridge"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "Halo Core Identity Provider, Multi-factor Authentication & OIDC Protocol Engine"
 license = "Apache-2.0"
@@ -41,3 +41,7 @@ digest = "0.10"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
+
+[[bench]]
+name = "pipeline"
+harness = false

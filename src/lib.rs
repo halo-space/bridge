@@ -27,9 +27,10 @@ pub mod validator;
 pub use audit::{AuditEvent, AuditEventType, AuditOutcome};
 pub use error::{IdpError, Result};
 pub use factor::basic::magic::{MagicLinkConfig, MagicLinkPayload, MagicLinkService};
+pub use factor::enterprise::{Device, DeviceProof};
 pub use factor::oidc::{Nonce, Pkce, State};
 pub use pipeline::{
-    Context, Edge, Event, Join, Kind, Node, Output, Pipeline, Progress, Run, Runner,
+    Context, Edge, Event, Join, Kind, Node, Output, Pipeline, Progress, Run, Runner, Services,
 };
 pub use pkg::password::{Algorithm, Argon2id, Bcrypt, Codec, Password, Pbkdf2, Sm3};
 pub use pkg::recovery::RecoveryCode;
@@ -37,6 +38,7 @@ pub use pkg::rsa::RsaCrypto;
 pub use pkg::totp::Totp;
 pub use risk::{RiskAssessment, RiskConfig, RiskDecision, RiskEngine, UserHistory};
 pub use rules::{Reauth, Rules};
+pub use store::Devices;
 pub use store::{Clients, Events, Factors, Limits, Passkeys, Secrets, Users};
 pub use types::{
     AuthCode, AuthResult, AuthUser, Identity, Level, Method, OAuthClient, TotpBinding,
@@ -69,12 +71,12 @@ pub mod bridge {
     pub use crate::{
         Algorithm, Argon2id, AuditEvent, AuditEventType, AuditOutcome, Bcrypt, CaptchaChallenge,
         CaptchaIssuer, CaptchaType, CaptchaVerifier, CaptchaVerifyReq, Clients, CodeIssuer, Codec,
-        Context, Edge, Event, Events, Factors, Identity, IdpError, Join, Kind, Limits, Method,
-        Node, Nonce, NotificationService, OAuthClient, Output, Passcode, Passkeys, Password,
-        Pbkdf2, Pipeline, Progress, Reauth, RecoveryCode, RecoveryIssuer, RecoveryVerifier, Result,
-        RiskAssessment, RiskConfig, RiskDecision, RiskEngine, Run, Runner, Scene, Secrets, Sm3,
-        SmsConfig, SmsSender, SmtpConfig, SmtpSender, Start, State, Totp, TotpIssuer, TotpVerifier,
-        Users, WebAuthn,
+        Context, Device, DeviceProof, Devices, Edge, Event, Events, Factors, Identity, IdpError,
+        Join, Kind, Limits, Method, Node, Nonce, NotificationService, OAuthClient, Output,
+        Passcode, Passkeys, Password, Pbkdf2, Pipeline, Progress, Reauth, RecoveryCode,
+        RecoveryIssuer, RecoveryVerifier, Result, RiskAssessment, RiskConfig, RiskDecision,
+        RiskEngine, Run, Runner, Scene, Secrets, Services, Sm3, SmsConfig, SmsSender, SmtpConfig,
+        SmtpSender, Start, State, Totp, TotpIssuer, TotpVerifier, Users, WebAuthn,
     };
     pub use crate::{AuthCode, AuthResult, AuthUser, Level, Rules, TotpBinding};
 }
