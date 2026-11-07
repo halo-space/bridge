@@ -86,6 +86,9 @@ fn test_saml_fixture_and_replay_cache() {
         sp_acs_url: "https://sp.example.com/bridge/acs".into(),
     })
     .unwrap();
+    let (dispatch, tracker) = saml.start(Some("bridge-state")).unwrap();
+    assert!(matches!(dispatch, saml::binding::Dispatch::Post(_)));
+    assert!(!tracker.request_id().is_empty());
     let response = include_bytes!("fixtures/saml_response.xml");
     let now = std::time::SystemTime::now();
     let cache = InMemoryReplayCache::new(16);
@@ -97,6 +100,7 @@ fn test_saml_fixture_and_replay_cache() {
     assert!(assertion.assertion_id.is_some());
 
     assert!(saml.check_with(response, now, &cache).is_err());
+    assert!(saml.check_state(response, now, &tracker, &cache).is_err());
 }
 
 #[test]

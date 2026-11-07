@@ -1,12 +1,14 @@
 use super::{SamlAssertion, SamlConfig};
 use crate::error::{IdpError, Result};
 use crate::types::Identity;
-use saml::binding::{SsoResponseBinding, SsoResponseEndpoint};
+use saml::binding::{Binding, SsoResponseBinding, SsoResponseEndpoint};
 use saml::descriptor::IdpDescriptor;
 use saml::dsig::algorithms::{DigestAlgorithm, PeerCryptoPolicy, SignatureAlgorithm};
 use saml::nameid::NameIdFormat;
 use saml::replay::{ReplayCache, ReplayMode};
-use saml::sp::{ConsumeResponse, ServiceProvider, ServiceProviderConfig, SpWantSigned};
+use saml::sp::{
+    ConsumeResponse, LoginTracker, ServiceProvider, ServiceProviderConfig, SpWantSigned, StartLogin,
+};
 use std::time::{Duration, SystemTime};
 
 pub struct SamlAuth {
@@ -59,7 +61,7 @@ impl SamlAuth {
     }
 
     pub fn check(&self, response: &[u8], now: SystemTime) -> Result<SamlAssertion> {
-        self.check_inner(response, now, None)
+        self.check_inner(response, now, None, None)
     }
 
     /// 校验 SAML 响应并使用调用方提供的原子重放缓存。
@@ -69,13 +71,50 @@ impl SamlAuth {
         now: SystemTime,
         replay_cache: &dyn ReplayCache,
     ) -> Result<SamlAssertion> {
-        self.check_inner(response, now, Some(replay_cache))
+        self.check_inner(response, now, None, Some(replay_cache))
+    }
+
+    /// 发起 SP 登录，返回需要由调用方保存的 tracker。
+    pub fn start(
+        &self,
+        relay_state: Option<&str>,
+    ) -> Result<(saml::binding::Dispatch, LoginTracker)> {
+        let started = self
+            .sp
+            .start_login(
+                &self.idp,
+                StartLogin {
+                    relay_state,
+                    binding: Binding::HttpPost,
+                    force_authn: false,
+                    is_passive: false,
+                    requested_name_id_format: Some(NameIdFormat::EmailAddress),
+                    requested_authn_context: None,
+                    acs_index: None,
+                    acs_url: None,
+                    response_binding: Some(SsoResponseBinding::HttpPost),
+                },
+            )
+            .map_err(|e| IdpError::OAuthError(format!("SAML login start rejected: {e}")))?;
+        Ok((started.dispatch, started.tracker))
+    }
+
+    /// 校验 SP 发起响应，强制关联 tracker 和 replay cache。
+    pub fn check_state(
+        &self,
+        response: &[u8],
+        now: SystemTime,
+        tracker: &LoginTracker,
+        replay_cache: &dyn ReplayCache,
+    ) -> Result<SamlAssertion> {
+        self.check_inner(response, now, Some(tracker), Some(replay_cache))
     }
 
     fn check_inner(
         &self,
         response: &[u8],
         now: SystemTime,
+        tracker: Option<&LoginTracker>,
         replay_cache: Option<&dyn ReplayCache>,
     ) -> Result<SamlAssertion> {
         let identity = self
@@ -86,7 +125,7 @@ impl SamlAuth {
                 saml_response: response,
                 binding: SsoResponseBinding::HttpPost,
                 relay_state: None,
-                tracker: None,
+                tracker,
                 expected_destination: &self.acs,
                 now,
                 clock_skew: Duration::from_secs(60),
