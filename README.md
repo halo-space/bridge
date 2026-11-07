@@ -6,7 +6,7 @@ Bridge 是一个面向企业身份认证的 Rust 能力库。它提供基础登�
 
 ```toml
 [dependencies]
-halo = { package = "halo-bridge", version = "0.1" }
+halo = { package = "halo-bridge", version = "0.3" }
 ```
 
 ```rust
@@ -104,6 +104,8 @@ pub trait Limits { /* 发送和验证频控 */ }
 Pipeline 的 `Services` 将节点绑定到现有能力：`Issue` 调用 `CodeIssuer` 或 WebAuthn，`Effect` 调用短信、邮件和审计，`Verify` 调用密码、验证码、短信验证码、邮箱验证码、TOTP、Passkey 和设备校验。调用方只提供存储契约和通道配置，不需要在每个节点里重新分派认证逻辑。
 
 用户输入通过 `Event::Input` 提交。`Pipeline::run` 自动推进可执行节点，遇到尚未提交的 `Input` 或 `Verify` 节点才返回 `Progress::Need`。
+
+所有可替换节点都通过 trait 扩展。内置短信使用 `SmsSender` 门面和 `Sender` 适配器；腾讯云使用 API 3.0 `SendSms` 与 TC3-HMAC-SHA256，其他供应商可以实现 `Sender` 后通过 `SmsSender::with` 接入。Pipeline 的自定义节点使用 `Runner`，可通过 `Extend` 在保留内置能力的同时增加自己的社交、企业或业务认证逻辑。
 
 ## 认证材料生命周期
 

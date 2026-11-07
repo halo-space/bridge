@@ -16,6 +16,10 @@ WebAuthn 注册、认证、持久化读取、计数器 CAS、完整凭证状态�
 
 Pipeline 内置 `Services` 已支持 `Effect("audit")` 自动调用 `Events::record_event`。非 Pipeline 认证入口仍由应用层显式记录事件。
 
+### 能力扩展和数据隔离
+
+短信已统一为 `SmsSender` + `Sender` 适配器，Pipeline 已提供 `Extend` 组合自定义节点。节点输入沿 DAG payload 传递，不再依赖全局字段扫描；Device nonce 在 Pipeline 校验时单次消费。
+
 ## 文档和测试
 
 - README 已按当前目录和能力状态整理

@@ -153,6 +153,37 @@ pub trait Runner: Send + Sync {
     async fn run(&self, node: &Node, context: &Context) -> Result<Output>;
 }
 
+/// 在内置能力之外组合自定义节点处理器。
+///
+/// `Base` 先处理 bridge 内置节点；只有遇到不支持的节点类型时才交给 `Extra`。
+/// 这样调用方可以扩展社交、企业、业务风控或自定义认证方式，而不需要复制内置流程。
+pub struct Extend<Base, Extra> {
+    pub base: Base,
+    pub extra: Extra,
+}
+
+impl<Base, Extra> Extend<Base, Extra> {
+    pub fn new(base: Base, extra: Extra) -> Self {
+        Self { base, extra }
+    }
+}
+
+#[allow(async_fn_in_trait)]
+impl<Base, Extra> Runner for Extend<Base, Extra>
+where
+    Base: Runner,
+    Extra: Runner,
+{
+    async fn run(&self, node: &Node, context: &Context) -> Result<Output> {
+        match self.base.run(node, context).await {
+            Err(IdpError::Internal(reason)) if reason.starts_with("Unsupported pipeline") => {
+                self.extra.run(node, context).await
+            }
+            result => result,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Run {
     pub context: Context,
@@ -171,6 +202,9 @@ pub struct Run {
     /// 已经收到输入、等待内置执行器校验的节点。
     #[serde(default)]
     pub submitted: BTreeSet<String>,
+    /// 每个活动节点沿 DAG 继承的输入快照，避免不同分支混用数据。
+    #[serde(default)]
+    pub payloads: BTreeMap<String, Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -271,6 +305,7 @@ impl Pipeline {
             steps: 0,
             denied: None,
             submitted: BTreeSet::new(),
+            payloads: BTreeMap::new(),
         };
         self.schedule(&mut run, &self.start)?;
         let progress = self.advance(&mut run)?;
@@ -310,16 +345,30 @@ impl Pipeline {
                 run.context.evidence.push(Evidence {
                     node: current.clone(),
                     at,
-                    data,
+                    data: data.clone(),
                 });
                 if matches!(node.kind, Kind::Verify(_)) {
+                    let inherited = run.payloads.get(&current).cloned();
+                    run.payloads
+                        .insert(current.clone(), merge_data(inherited, data.clone()));
                     run.submitted.insert(current.clone());
                     return Ok(self.need(&current));
                 }
+                let inherited = run.payloads.get(&current).cloned();
+                run.payloads
+                    .insert(current.clone(), merge_data(inherited, data.clone()));
                 let targets = self.targets(node, &[])?;
                 run.completed.insert(current.clone());
                 run.current = None;
                 for target in targets {
+                    let inherited = run
+                        .payloads
+                        .get(&current)
+                        .cloned()
+                        .unwrap_or_else(|| run.context.data[&current].clone());
+                    let payload = merge_data(Some(inherited), run.context.data[&current].clone());
+                    run.payloads.insert(target.clone(), payload.clone());
+                    run.context.data.insert(target.clone(), payload);
                     self.arrive(run, &current, &target, false)?;
                 }
                 self.advance(run)
@@ -351,12 +400,16 @@ impl Pipeline {
                 run.context.evidence.push(Evidence {
                     node: current.clone(),
                     at,
-                    data,
+                    data: data.clone(),
                 });
                 run.submitted.remove(&current);
                 run.completed.insert(current.clone());
                 run.current = None;
                 for target in targets {
+                    let inherited = run.payloads.get(&current).cloned();
+                    let payload = merge_data(inherited, data.clone());
+                    run.payloads.insert(target.clone(), payload.clone());
+                    run.context.data.insert(target.clone(), payload);
                     self.arrive(run, &current, &target, false)?;
                 }
                 self.advance(run)
@@ -515,29 +568,27 @@ impl Pipeline {
     }
 
     fn has_input(&self, run: &Run, node: &Node) -> bool {
-        if run.context.data.contains_key(&node.id) {
-            return true;
-        }
+        let Some(value) = run.context.data.get(&node.id) else {
+            return false;
+        };
         let Kind::Verify(kind) = &node.kind else {
             return false;
         };
-        run.context.data.values().any(|value| {
-            if kind == "captcha" || kind.starts_with("captcha.") {
-                value.get("id").is_some() && value.get("captcha_type").is_some()
-            } else if kind == "passkey" || kind == "webauthn" {
-                value.get("input").is_some() || value.get("credential").is_some()
-            } else if kind == "device" {
-                value.get("signature").is_some() && value.get("device_id").is_some()
-            } else if kind == "password"
-                || kind == "account.password"
-                || kind == "email.password"
-                || kind == "phone.password"
-            {
-                value.get("password").is_some()
-            } else {
-                value.get("code").is_some()
-            }
-        })
+        if kind == "captcha" || kind.starts_with("captcha.") {
+            value.get("id").is_some() && value.get("captcha_type").is_some()
+        } else if kind == "passkey" || kind == "webauthn" {
+            value.get("input").is_some() || value.get("credential").is_some()
+        } else if kind == "device" {
+            value.get("signature").is_some() && value.get("device_id").is_some()
+        } else if kind == "password"
+            || kind == "account.password"
+            || kind == "email.password"
+            || kind == "phone.password"
+        {
+            value.get("password").is_some()
+        } else {
+            value.get("code").is_some()
+        }
     }
 
     fn schedule(&self, run: &mut Run, node_id: &str) -> Result<()> {
@@ -719,6 +770,16 @@ impl Pipeline {
         let mut visiting = BTreeSet::new();
         let mut done = BTreeSet::new();
         visit(self, &self.start, &mut stack, &mut visiting, &mut done)
+    }
+}
+
+fn merge_data(previous: Option<Value>, current: Value) -> Value {
+    match (previous, current) {
+        (Some(Value::Object(mut previous)), Value::Object(current)) => {
+            previous.extend(current);
+            Value::Object(previous)
+        }
+        (_, current) => current,
     }
 }
 
@@ -1061,5 +1122,41 @@ mod tests {
             pipeline.execute(&mut run, &Pass).await.unwrap(),
             Progress::Done
         );
+    }
+
+    struct Unsupported;
+
+    impl Runner for Unsupported {
+        async fn run(&self, node: &Node, _context: &Context) -> Result<Output> {
+            Err(IdpError::Internal(format!(
+                "Unsupported pipeline verifier: {}",
+                node.id
+            )))
+        }
+    }
+
+    struct Custom;
+
+    impl Runner for Custom {
+        async fn run(&self, _node: &Node, _context: &Context) -> Result<Output> {
+            Ok(Output::Pass {
+                routes: Vec::new(),
+                data: serde_json::json!({ "custom": true }),
+                identity: None,
+                at: 1,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn extends_builtin_runner_with_custom_kind() {
+        let pipeline = Pipeline::new("custom", vec![Node::effect("custom", "social.custom")]);
+        let (mut run, _) = pipeline.start(Context::default()).unwrap();
+        let runner = Extend::new(Unsupported, Custom);
+        assert_eq!(
+            pipeline.run(&mut run, &runner).await.unwrap(),
+            Progress::Done
+        );
+        assert_eq!(run.context.data["custom"]["custom"], Value::Bool(true));
     }
 }

@@ -1,4 +1,5 @@
 use crate::error::{IdpError, Result};
+use crate::store::Secrets;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use rsa::{RsaPublicKey, pkcs1v15::Pkcs1v15Sign, pkcs8::DecodePublicKey};
@@ -55,6 +56,18 @@ impl Device {
         self.enabled = true;
     }
 
+    pub fn nonce_key(&self, nonce: &str) -> String {
+        format!("device:nonce:{}:{}", self.id, nonce)
+    }
+
+    /// 为设备创建一次性证明 nonce。调用方应把返回值放入认证请求。
+    pub async fn issue_nonce<K: Secrets>(&self, kv: &K, ttl_secs: u64) -> Result<String> {
+        let nonce = uuid::Uuid::new_v4().simple().to_string();
+        kv.set(&self.nonce_key(&nonce), "1", ttl_secs.max(1))
+            .await?;
+        Ok(nonce)
+    }
+
     /// 校验设备对一次性 nonce 的 RSA-SHA256 签名。
     pub fn verify(&self, proof: &DeviceProof, now: i64, window: i64) -> Result<()> {
         if !self.enabled {
@@ -84,6 +97,36 @@ mod tests {
     use super::*;
     use rand_core::OsRng;
     use rsa::{RsaPrivateKey, pkcs1v15::Pkcs1v15Sign, pkcs8::EncodePublicKey};
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Clone, Default)]
+    struct Mem(Arc<Mutex<HashMap<String, String>>>);
+
+    impl Secrets for Mem {
+        async fn set(&self, key: &str, value: &str, _ttl: u64) -> Result<()> {
+            self.0.lock().unwrap().insert(key.into(), value.into());
+            Ok(())
+        }
+        async fn get(&self, key: &str) -> Result<Option<String>> {
+            Ok(self.0.lock().unwrap().get(key).cloned())
+        }
+        async fn take(&self, key: &str) -> Result<Option<String>> {
+            Ok(self.0.lock().unwrap().remove(key))
+        }
+        async fn take_if(&self, key: &str, expected: &str) -> Result<bool> {
+            let mut values = self.0.lock().unwrap();
+            if values.get(key).map(String::as_str) != Some(expected) {
+                return Ok(false);
+            }
+            values.remove(key);
+            Ok(true)
+        }
+        async fn del(&self, key: &str) -> Result<()> {
+            self.0.lock().unwrap().remove(key);
+            Ok(())
+        }
+    }
 
     #[test]
     fn verifies_and_rejects_device_proof() {
@@ -105,5 +148,26 @@ mod tests {
         };
         assert!(device.verify(&proof, 101, 30).is_ok());
         assert!(device.verify(&proof, 200, 30).is_err());
+    }
+
+    #[tokio::test]
+    async fn issues_a_single_use_nonce() {
+        let device = Device::new("d1", 1, "u1", "laptop", "unused", 100);
+        let store = Mem::default();
+        let nonce = device.issue_nonce(&store, 60).await.unwrap();
+        assert!(
+            store
+                .take(&device.nonce_key(&nonce))
+                .await
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            store
+                .take(&device.nonce_key(&nonce))
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 }

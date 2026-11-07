@@ -89,6 +89,21 @@ where
     D: Devices,
 {
     async fn issue(&self, node: &Node, context: &Context, kind: &str) -> Result<Output> {
+        if kind == "device" {
+            let data = node_data(context, node)?;
+            let device_id = string(data, "device_id")?;
+            let device = self
+                .devices
+                .find(context.tenant_id, &device_id)
+                .await?
+                .ok_or_else(|| IdpError::AuthFailed("Device not found".into()))?;
+            let nonce = device.issue_nonce(&self.secrets, self.code_ttl).await?;
+            return Ok(pass(json!({
+                "device_id": device_id,
+                "nonce": nonce,
+                "expires_in": self.code_ttl,
+            })));
+        }
         if kind == "captcha" || kind.starts_with("captcha.") {
             let captcha_type = captcha_type(kind)?;
             let challenge = self
@@ -168,7 +183,7 @@ where
             return Ok(pass(json!({ "token": token })));
         }
         if kind == "sms" || kind == "code.sms" {
-            let phone = string_or_context(&data, context, "phone")?;
+            let phone = string(&data, "phone")?;
             let code = string(&data, "code")?;
             let user =
                 SmsCode::authenticate(&self.users, &self.secrets, context.tenant_id, &phone, &code)
@@ -176,7 +191,7 @@ where
             return Ok(identity_pass(user));
         }
         if kind == "email" || kind == "code.email" {
-            let email = string_or_context(&data, context, "email")?;
+            let email = string(&data, "email")?;
             let code = string(&data, "code")?;
             let user = EmailCode::authenticate(
                 &self.users,
@@ -272,6 +287,16 @@ where
             .await?
             .ok_or_else(|| IdpError::AuthFailed("Device not found".into()))?;
         device.verify(&proof, now, window)?;
+        if self
+            .secrets
+            .take(&device.nonce_key(&proof.nonce))
+            .await?
+            .is_none()
+        {
+            return Err(IdpError::AuthFailed(
+                "Device proof is expired or already used".into(),
+            ));
+        }
         let mut used = device;
         used.last_used_at = Some(proof.at);
         if !self.devices.update(used).await? {
@@ -493,14 +518,6 @@ fn node_data<'a>(context: &'a Context, node: &Node) -> Result<&'a Value> {
     context
         .data
         .get(&node.id)
-        .or_else(|| {
-            context.data.values().rev().find(|value| {
-                value.get("code").is_some()
-                    || value.get("input").is_some()
-                    || value.get("credential").is_some()
-                    || value.get("id").is_some()
-            })
-        })
         .ok_or_else(|| IdpError::AuthFailed(format!("Missing input for node: {}", node.id)))
 }
 
@@ -511,13 +528,6 @@ fn string(value: &Value, key: &str) -> Result<String> {
         .filter(|value| !value.trim().is_empty())
         .map(str::to_string)
         .ok_or_else(|| IdpError::AuthFailed(format!("Missing field: {key}")))
-}
-
-fn string_or_context(value: &Value, context: &Context, key: &str) -> Result<String> {
-    string(value, key).or_else(|_| {
-        find_string(context, key)
-            .ok_or_else(|| IdpError::AuthFailed(format!("Missing field: {key}")))
-    })
 }
 
 fn find_string(context: &Context, key: &str) -> Option<String> {
@@ -534,7 +544,7 @@ fn target(context: &Context, node: &Node, channel: &str) -> Result<String> {
             return Ok(target.to_string());
         }
     }
-    find_string(context, key).ok_or_else(|| IdpError::AuthFailed(format!("Missing field: {key}")))
+    Err(IdpError::AuthFailed(format!("Missing field: {key}")))
 }
 
 fn latest_issue(context: &Context) -> Option<&Map<String, Value>> {

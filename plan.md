@@ -90,7 +90,14 @@
 - [x] 覆盖滑块、短信签发、短信发送、短信校验、TOTP、密码和审计流程
 - [x] 增加 Pipeline 基准程序和外部流程验证
 
-验收结果：滑块 → 验证码签发 → 短信发送 → 短信校验 → 审计、TOTP 和密码流程均已通过集成测试；Release 基准中 10,000 轮纯 Pipeline 状态推进约 5.97µs/轮。
+验收结果：滑块 → 验证码签发 → 短信发送 → 短信校验 → 审计、TOTP 和密码流程均已通过集成测试；Release 基准中 10,000 轮纯 Pipeline 状态推进约 5.05µs/轮。
+
+## 阶段八：统一扩展能力
+
+- [x] 增加短信 `Sender` 适配器和 Tencent API 3.0 实现
+- [x] 增加 `Extend` 组合自定义 Pipeline 节点
+- [x] 按 DAG payload 传递输入，避免分支字段混用
+- [x] 增加 Device nonce 单次消费
 
 结论：`verify_token` 只做签名和 Claims 校验；需要实时状态的请求统一使用 `verify_live`。Refresh Token 换发通过 `Users` 检查租户、用户存在和 `is_active`，bridge 不维护用户数据。RSA 使用 `from_private_pem` 加载持久化密钥，`private_key_pem` 导出，`rotate` 显式轮换；全局生成只作为默认兼容入口。短信和邮件 sender 的 `strict` 模式用于生产失败闭环，关闭时保留开发 Mock 行为。Events 使用 `event.id` 幂等，并支持 trace/request 字段；写入失败由存储实现返回错误。
 

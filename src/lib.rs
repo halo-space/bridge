@@ -30,7 +30,8 @@ pub use factor::basic::magic::{MagicLinkConfig, MagicLinkPayload, MagicLinkServi
 pub use factor::enterprise::{Device, DeviceProof};
 pub use factor::oidc::{Nonce, Pkce, State};
 pub use pipeline::{
-    Context, Edge, Event, Join, Kind, Node, Output, Pipeline, Progress, Run, Runner, Services,
+    Context, Edge, Event, Extend, Join, Kind, Node, Output, Pipeline, Progress, Run, Runner,
+    Services,
 };
 pub use pkg::password::{Algorithm, Argon2id, Bcrypt, Codec, Password, Pbkdf2, Sm3};
 pub use pkg::recovery::RecoveryCode;
@@ -44,8 +45,8 @@ pub use types::{
     AuthCode, AuthResult, AuthUser, Identity, Level, Method, OAuthClient, TotpBinding,
 };
 pub use validator::issuer::{CaptchaIssuer, CodeIssuer, RecoveryIssuer, Scene, TotpIssuer};
+pub use validator::sender::sms::{BoxFuture, Sender, SmsConfig, SmsSender};
 pub use validator::sender::{NotificationService, NotifyChannel};
-pub use validator::sender::{SmsConfig, SmsSender};
 pub use validator::sender::{SmtpConfig, SmtpSender};
 pub use validator::verifier::Passcode;
 pub use validator::verifier::captcha::CaptchaVerifier;
@@ -69,14 +70,15 @@ pub mod bridge {
     pub use crate::validator;
 
     pub use crate::{
-        Algorithm, Argon2id, AuditEvent, AuditEventType, AuditOutcome, Bcrypt, CaptchaChallenge,
-        CaptchaIssuer, CaptchaType, CaptchaVerifier, CaptchaVerifyReq, Clients, CodeIssuer, Codec,
-        Context, Device, DeviceProof, Devices, Edge, Event, Events, Factors, Identity, IdpError,
-        Join, Kind, Limits, Method, Node, Nonce, NotificationService, OAuthClient, Output,
-        Passcode, Passkeys, Password, Pbkdf2, Pipeline, Progress, Reauth, RecoveryCode,
-        RecoveryIssuer, RecoveryVerifier, Result, RiskAssessment, RiskConfig, RiskDecision,
-        RiskEngine, Run, Runner, Scene, Secrets, Services, Sm3, SmsConfig, SmsSender, SmtpConfig,
-        SmtpSender, Start, State, Totp, TotpIssuer, TotpVerifier, Users, WebAuthn,
+        Algorithm, Argon2id, AuditEvent, AuditEventType, AuditOutcome, Bcrypt, BoxFuture,
+        CaptchaChallenge, CaptchaIssuer, CaptchaType, CaptchaVerifier, CaptchaVerifyReq, Clients,
+        CodeIssuer, Codec, Context, Device, DeviceProof, Devices, Edge, Event, Events, Extend,
+        Factors, Identity, IdpError, Join, Kind, Limits, Method, Node, Nonce, NotificationService,
+        OAuthClient, Output, Passcode, Passkeys, Password, Pbkdf2, Pipeline, Progress, Reauth,
+        RecoveryCode, RecoveryIssuer, RecoveryVerifier, Result, RiskAssessment, RiskConfig,
+        RiskDecision, RiskEngine, Run, Runner, Scene, Secrets, Sender, Services, Sm3, SmsConfig,
+        SmsSender, SmtpConfig, SmtpSender, Start, State, Totp, TotpIssuer, TotpVerifier, Users,
+        WebAuthn,
     };
     pub use crate::{AuthCode, AuthResult, AuthUser, Level, Rules, TotpBinding};
 }
