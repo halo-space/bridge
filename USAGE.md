@@ -22,13 +22,13 @@ Pipeline 只负责节点图、状态、路由、汇聚、重试和暂停恢复�
 配置先编译校验，再创建 Pipeline：
 
 ```rust
-use halo::bridge::{Codes, Op, Pipeline, PipelineConfig};
+use halo::bridge::{Cards, Op, Pipeline, PipelineConfig};
 
 let config: PipelineConfig = serde_json::from_str(json_text)?;
-let codes = Codes::new()
+let cards = Cards::new()
     .add(Op::Verify, "password")
     .add(Op::Verify, "custom.card");
-let pipeline: Pipeline = config.compile_with(&codes)?;
+let pipeline: Pipeline = config.compile_with(&cards)?;
 ```
 
 页面配置使用 `type`、`code` 和 `args`：

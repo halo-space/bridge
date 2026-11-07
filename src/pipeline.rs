@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 pub mod services;
 pub use services::Services;
 pub mod config;
-pub use config::{Codes, EdgeConfig, NodeConfig, Op, PipelineConfig};
+pub use config::{Cards, EdgeConfig, NodeConfig, Op, PipelineConfig};
 
 const DEFAULT_MAX_STEPS: u32 = 128;
 

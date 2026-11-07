@@ -58,8 +58,8 @@ fn default_version() -> u16 {
 }
 
 impl PipelineConfig {
-    pub fn compile_with(&self, codes: &Codes) -> Result<Pipeline> {
-        codes.validate(self)?;
+    pub fn compile_with(&self, cards: &Cards) -> Result<Pipeline> {
+        cards.validate(self)?;
         self.clone().compile()
     }
 
@@ -111,7 +111,7 @@ impl NodeConfig {
 
 /// 页面配置发布前使用的能力码表。未注册的 code 不允许发布。
 #[derive(Debug, Clone, Default)]
-pub struct Codes {
+pub struct Cards {
     values: BTreeMap<Op, BTreeSet<String>>,
 }
 
@@ -120,7 +120,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn compiles_page_config_and_checks_registered_codes() {
+    fn compiles_page_config_and_checks_registered_cards() {
         let config: PipelineConfig = serde_json::from_value(serde_json::json!({
             "version": 1,
             "start": "input",
@@ -140,8 +140,8 @@ mod tests {
             ]
         }))
         .unwrap();
-        let codes = Codes::new().add(Op::Verify, "password");
-        let pipeline = config.compile_with(&codes).unwrap();
+        let cards = Cards::new().add(Op::Verify, "password");
+        let pipeline = config.compile_with(&cards).unwrap();
         let node = pipeline.nodes().find(|node| node.id == "password").unwrap();
         assert_eq!(node.args["source"], "company");
     }
@@ -163,11 +163,11 @@ mod tests {
                 limit: None,
             }],
         };
-        assert!(config.compile_with(&Codes::new()).is_err());
+        assert!(config.compile_with(&Cards::new()).is_err());
     }
 }
 
-impl Codes {
+impl Cards {
     pub fn new() -> Self {
         Self::default()
     }
@@ -180,7 +180,7 @@ impl Codes {
     pub fn supports(&self, op: Op, code: &str) -> bool {
         self.values
             .get(&op)
-            .is_some_and(|codes| codes.contains(code))
+            .is_some_and(|cards| cards.contains(code))
     }
 
     pub fn validate(&self, config: &PipelineConfig) -> Result<()> {

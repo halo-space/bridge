@@ -30,7 +30,7 @@ pub use factor::basic::magic::{MagicLinkConfig, MagicLinkPayload, MagicLinkServi
 pub use factor::enterprise::{Device, DeviceProof};
 pub use factor::oidc::{Nonce, Pkce, State};
 pub use pipeline::{
-    Codes, Context, Edge, EdgeConfig, Event, Fallback, Join, Kind, Node, NodeConfig, Op, Output,
+    Cards, Context, Edge, EdgeConfig, Event, Fallback, Join, Kind, Node, NodeConfig, Op, Output,
     Pipeline, PipelineConfig, Progress, Run, Runner, Services,
 };
 pub use pkg::password::{Algorithm, Argon2id, Bcrypt, Codec, Password, Pbkdf2, Sm3};
@@ -71,8 +71,8 @@ pub mod bridge {
 
     pub use crate::{
         Algorithm, Argon2id, AuditEvent, AuditEventType, AuditOutcome, Bcrypt, BoxFuture,
-        CaptchaChallenge, CaptchaIssuer, CaptchaType, CaptchaVerifier, CaptchaVerifyReq, Clients,
-        CodeIssuer, Codec, Codes, Context, Device, DeviceProof, Devices, Edge, EdgeConfig, Event,
+        CaptchaChallenge, CaptchaIssuer, CaptchaType, CaptchaVerifier, CaptchaVerifyReq, Cards,
+        Clients, CodeIssuer, Codec, Context, Device, DeviceProof, Devices, Edge, EdgeConfig, Event,
         Events, Factors, Fallback, Identity, IdpError, Join, Kind, Limits, Method, Node,
         NodeConfig, Nonce, NotificationService, OAuthClient, Op, Output, Passcode, Passkeys,
         Password, Pbkdf2, Pipeline, PipelineConfig, Progress, Reauth, RecoveryCode, RecoveryIssuer,
