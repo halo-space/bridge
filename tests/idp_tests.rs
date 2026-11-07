@@ -13,6 +13,7 @@ use bridge::validator::verifier::captcha::{
     SliderCaptcha, TargetPoint,
 };
 use bridge::{WebAuthn, factor, token};
+use saml::InMemoryReplayCache;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -73,6 +74,29 @@ fn test_oidc_values_generate_and_validate() {
     assert!(oidc::Pkce::check(&verifier, &challenge, Some("S256")).is_ok());
     assert!(oidc::Pkce::check("wrong", &challenge, Some("S256")).is_err());
     assert!(oidc::Pkce::check("short", "short", Some("plain")).is_err());
+}
+
+#[test]
+fn test_saml_fixture_and_replay_cache() {
+    let saml = factor::enterprise::SamlAuth::new(&factor::enterprise::SamlConfig {
+        idp_entity_id: "https://idp.example.com/bridge".into(),
+        idp_sso_url: "https://idp.example.com/bridge/sso".into(),
+        metadata: include_str!("fixtures/saml_metadata.xml").into(),
+        sp_entity_id: "https://sp.example.com/bridge".into(),
+        sp_acs_url: "https://sp.example.com/bridge/acs".into(),
+    })
+    .unwrap();
+    let response = include_bytes!("fixtures/saml_response.xml");
+    let now = std::time::SystemTime::now();
+    let cache = InMemoryReplayCache::new(16);
+
+    let assertion = saml.check_with(response, now, &cache).unwrap();
+    assert_eq!(assertion.name_id, "alice@example.com");
+    assert_eq!(assertion.email.as_deref(), Some("alice@example.com"));
+    assert_eq!(assertion.display_name.as_deref(), Some("Alice Example"));
+    assert!(assertion.assertion_id.is_some());
+
+    assert!(saml.check_with(response, now, &cache).is_err());
 }
 
 #[test]

@@ -5,7 +5,7 @@ use saml::binding::{SsoResponseBinding, SsoResponseEndpoint};
 use saml::descriptor::IdpDescriptor;
 use saml::dsig::algorithms::{DigestAlgorithm, PeerCryptoPolicy, SignatureAlgorithm};
 use saml::nameid::NameIdFormat;
-use saml::replay::ReplayMode;
+use saml::replay::{ReplayCache, ReplayMode};
 use saml::sp::{ConsumeResponse, ServiceProvider, ServiceProviderConfig, SpWantSigned};
 use std::time::{Duration, SystemTime};
 
@@ -59,6 +59,25 @@ impl SamlAuth {
     }
 
     pub fn check(&self, response: &[u8], now: SystemTime) -> Result<SamlAssertion> {
+        self.check_inner(response, now, None)
+    }
+
+    /// 校验 SAML 响应并使用调用方提供的原子重放缓存。
+    pub fn check_with(
+        &self,
+        response: &[u8],
+        now: SystemTime,
+        replay_cache: &dyn ReplayCache,
+    ) -> Result<SamlAssertion> {
+        self.check_inner(response, now, Some(replay_cache))
+    }
+
+    fn check_inner(
+        &self,
+        response: &[u8],
+        now: SystemTime,
+        replay_cache: Option<&dyn ReplayCache>,
+    ) -> Result<SamlAssertion> {
         let identity = self
             .sp
             .consume_response(ConsumeResponse {
@@ -71,7 +90,7 @@ impl SamlAuth {
                 expected_destination: &self.acs,
                 now,
                 clock_skew: Duration::from_secs(60),
-                replay_cache: None,
+                replay_cache,
                 replay_mode: ReplayMode::All,
                 holder_of_key_cert: None,
             })
