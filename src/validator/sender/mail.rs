@@ -24,6 +24,9 @@ pub struct SmtpConfig {
     /// 是否启用真实外网邮件发送
     #[serde(default)]
     pub enabled: bool,
+    /// 未启用或配置不完整时是否返回错误；开发环境可保持 false 使用 Mock 行为。
+    #[serde(default)]
+    pub strict: bool,
     /// SMTP 服务器地址 (如 smtp.exmail.qq.com, smtp.aliyun.com)
     #[serde(default)]
     pub host: String,
@@ -51,6 +54,7 @@ impl Default for SmtpConfig {
     fn default() -> Self {
         Self {
             enabled: false,
+            strict: false,
             host: String::new(),
             port: 465,
             username: String::new(),
@@ -94,6 +98,11 @@ impl SmtpSender {
         plain_text: Option<&str>,
     ) -> Result<()> {
         if !self.is_active() {
+            if self.config.strict {
+                return Err(IdpError::EmailFailed(
+                    "SMTP channel is disabled or incomplete".into(),
+                ));
+            }
             tracing::info!(
                 target: "idp::mailer",
                 "SMTP 未启用或配置不全，跳过公网邮件投递: to={}, subject={}",
@@ -302,5 +311,17 @@ mod tests {
             .send_verification_code("test@example.com", "123456", "login", 300)
             .await;
         assert!(res.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_smtp_strict_mode_rejects_inactive_channel() {
+        let sender = SmtpSender::new(SmtpConfig {
+            strict: true,
+            ..SmtpConfig::default()
+        });
+        let res = sender
+            .send_verification_code("test@example.com", "123456", "login", 300)
+            .await;
+        assert!(matches!(res, Err(IdpError::EmailFailed(_))));
     }
 }

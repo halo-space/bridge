@@ -13,6 +13,9 @@ type HmacSha1 = Hmac<Sha1>;
 pub struct SmsConfig {
     #[serde(default)]
     pub enabled: bool,
+    /// 未启用或配置不完整时是否返回错误；开发环境可保持 false 使用 Mock 行为。
+    #[serde(default)]
+    pub strict: bool,
     /// 短信服务商: "aliyun" (默认) | "tencent" | "mock"
     #[serde(default = "default_provider")]
     pub provider: String,
@@ -39,6 +42,7 @@ impl Default for SmsConfig {
     fn default() -> Self {
         Self {
             enabled: false,
+            strict: false,
             provider: default_provider(),
             access_key_id: String::new(),
             access_key_secret: String::new(),
@@ -82,6 +86,11 @@ impl SmsSender {
         ttl_secs: u64,
     ) -> Result<()> {
         if !self.is_active() {
+            if self.config.strict {
+                return Err(IdpError::SmsFailed(
+                    "SMS channel is disabled or incomplete".into(),
+                ));
+            }
             tracing::info!(
                 target: "idp::sms",
                 "SMS 短信通道未启用或未配置，跳过外网短信投递: phone={}, code={}",
@@ -236,5 +245,17 @@ mod tests {
             .send_verification_code("13800000000", "888888", 300)
             .await;
         assert!(res.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_sms_strict_mode_rejects_inactive_channel() {
+        let sender = SmsSender::new(SmsConfig {
+            strict: true,
+            ..SmsConfig::default()
+        });
+        let res = sender
+            .send_verification_code("13800000000", "888888", 300)
+            .await;
+        assert!(matches!(res, Err(IdpError::SmsFailed(_))));
     }
 }
