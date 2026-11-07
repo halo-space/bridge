@@ -62,7 +62,7 @@ let page_schema = cards.schema();
 需要使用密钥时只保存引用，不把真实值写入页面配置：
 
 ```rust
-let value = halo::bridge::SecretRef::new("sms.tencent.secret").value();
+let value = halo::bridge::secret("sms.tencent.secret");
 ```
 
 应用层 Runner 负责根据这个引用从自己的密钥系统读取真实值。

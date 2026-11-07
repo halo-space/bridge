@@ -109,7 +109,7 @@ Pipeline 的 `Services` 是 bridge 提供的可选默认适配器，不是能力
 
 页面配置通过 `PipelineConfig` 编译，并使用 `Cards` 校验固定能力码；自定义能力例如 `custom.card` 必须先注册。节点的 `args` 会传给用户自己的 `Runner`。
 
-`Cards::schema()` 可生成页面编辑器使用的能力 Schema；敏感配置使用 `SecretRef` 保存引用，真实密钥由应用层解析。
+`Cards::schema()` 可生成页面编辑器使用的能力 Schema；敏感配置使用 `secret("...")` 保存引用，真实密钥由应用层解析。
 
 发布配置后可以调用 `Cards::validate_runner` 检查实际 Runner 是否支持所有能力和版本。
 

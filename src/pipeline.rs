@@ -8,7 +8,7 @@ pub mod services;
 pub use services::Services;
 pub mod config;
 pub use config::{
-    Arg, Card, Cards, EdgeConfig, NodeConfig, Op, PipelineConfig, Resolve, SecretRef,
+    Arg, Card, Cards, EdgeConfig, NodeConfig, Op, PipelineConfig, Resolve, Secret, secret,
 };
 
 const DEFAULT_MAX_STEPS: u32 = 128;

@@ -153,11 +153,11 @@ pub struct Arg {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SecretRef {
+pub struct Secret {
     pub key: String,
 }
 
-impl SecretRef {
+impl Secret {
     pub fn new(key: impl Into<String>) -> Self {
         Self { key: key.into() }
     }
@@ -169,6 +169,10 @@ impl SecretRef {
     pub async fn resolve<R: Resolve>(&self, source: &R) -> Result<String> {
         source.secret(&self.key).await
     }
+}
+
+pub fn secret(key: impl Into<String>) -> Value {
+    Secret::new(key).value()
 }
 
 #[allow(async_fn_in_trait)]

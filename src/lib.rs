@@ -31,8 +31,8 @@ pub use factor::enterprise::{Device, DeviceProof};
 pub use factor::oidc::{Nonce, Pkce, State};
 pub use pipeline::{
     Arg, Card, Cards, Context, Edge, EdgeConfig, Effect, Event, Fallback, Join, Kind, Node,
-    NodeConfig, Op, Output, Pipeline, PipelineConfig, Progress, Resolve, Run, Runner, SecretRef,
-    Services,
+    NodeConfig, Op, Output, Pipeline, PipelineConfig, Progress, Resolve, Run, Runner, Secret,
+    Services, secret,
 };
 pub use pkg::password::{Algorithm, Argon2id, Bcrypt, Codec, Password, Pbkdf2, Sm3};
 pub use pkg::recovery::RecoveryCode;
@@ -78,8 +78,9 @@ pub mod bridge {
         Node, NodeConfig, Nonce, NotificationService, OAuthClient, Op, Output, Passcode, Passkeys,
         Password, Pbkdf2, Pipeline, PipelineConfig, Progress, Reauth, RecoveryCode, RecoveryIssuer,
         RecoveryVerifier, Resolve, Result, RiskAssessment, RiskConfig, RiskDecision, RiskEngine,
-        Run, Runner, Scene, SecretRef, Secrets, Sender, Services, Sm3, SmsConfig, SmsSender,
+        Run, Runner, Scene, Secret, Secrets, Sender, Services, Sm3, SmsConfig, SmsSender,
         SmtpConfig, SmtpSender, Start, State, Totp, TotpIssuer, TotpVerifier, Users, WebAuthn,
+        secret,
     };
     pub use crate::{AuthCode, AuthResult, AuthUser, Level, Rules, TotpBinding};
 }
