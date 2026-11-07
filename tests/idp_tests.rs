@@ -529,7 +529,7 @@ impl Passkeys for MemPasskeys {
         tenant: &str,
         credential_id: &str,
         old_count: u32,
-        new_count: u32,
+        next: Passkey,
     ) -> bridge::Result<bool> {
         let mut data = self.data.lock().unwrap();
         let Some((_, _, passkey)) = data.iter_mut().find(|(stored_tenant, _, passkey)| {
@@ -537,10 +537,13 @@ impl Passkeys for MemPasskeys {
         }) else {
             return Ok(false);
         };
-        if passkey.sign_count != old_count || !passkey.can_update(new_count) {
+        if passkey.sign_count != old_count
+            || next.credential_id != credential_id
+            || !passkey.can_update(next.sign_count)
+        {
             return Ok(false);
         }
-        passkey.sign_count = new_count;
+        *passkey = next;
         passkey.last_used_at = Some(chrono::Utc::now().timestamp());
         Ok(true)
     }
@@ -632,8 +635,8 @@ async fn test_passkey_counter_update_is_compare_and_set() {
     let left = store.clone();
     let right = store.clone();
     let (first, second) = tokio::join!(
-        left.update("t1", "key-1", 1, 2),
-        right.update("t1", "key-1", 1, 3),
+        left.update("t1", "key-1", 1, test_passkey("key-1", 2)),
+        right.update("t1", "key-1", 1, test_passkey("key-1", 3)),
     );
     assert_eq!(
         [first.unwrap(), second.unwrap()]
@@ -642,7 +645,12 @@ async fn test_passkey_counter_update_is_compare_and_set() {
             .count(),
         1
     );
-    assert!(store.update("t1", "key-1", 1, 4).await.unwrap() == false);
+    assert!(
+        !store
+            .update("t1", "key-1", 1, test_passkey("key-1", 4))
+            .await
+            .unwrap()
+    );
 }
 
 #[test]
@@ -1142,7 +1150,7 @@ async fn test_passkey_fixture_register_request_verify() {
 
     let auth = webauthn.request(&[stored]).unwrap();
     let mut auth_state: serde_json::Value = serde_json::from_str(&auth.state).unwrap();
-    auth_state["ast"]["challenge"] =
+    auth_state["state"]["ast"]["challenge"] =
         serde_json::Value::String("vXR-a0od0rVjsq3WptR82x2pCToaG3j2V62p0vGZlr0".into());
 
     let result = webauthn
@@ -1160,9 +1168,10 @@ async fn test_passkey_fixture_register_request_verify() {
     assert!(!result.backup_eligible);
     assert!(!result.backup_state);
     assert!(result.needs_update);
+    assert!(result.data.is_some());
 
     let mut replay_state = auth_state.clone();
-    replay_state["ast"]["challenge"] = serde_json::Value::String("invalid".into());
+    replay_state["state"]["ast"]["challenge"] = serde_json::Value::String("invalid".into());
     assert!(
         webauthn
             .verify(
@@ -1172,14 +1181,19 @@ async fn test_passkey_fixture_register_request_verify() {
             .is_err()
     );
 
+    let mut next = store
+        .find("t1", "KwlEDOBCBc9P1YU3NWihYLCeY-I9KGMhPap9vwHbVoI")
+        .await
+        .unwrap()
+        .unwrap();
+    next.sign_count = result.counter;
+    next.user_verified = result.user_verified;
+    next.backup_eligible = result.backup_eligible;
+    next.backup_state = result.backup_state;
+    next.data = result.data.clone();
     assert!(
         store
-            .update(
-                "t1",
-                "KwlEDOBCBc9P1YU3NWihYLCeY-I9KGMhPap9vwHbVoI",
-                0,
-                result.counter,
-            )
+            .update("t1", "KwlEDOBCBc9P1YU3NWihYLCeY-I9KGMhPap9vwHbVoI", 0, next,)
             .await
             .unwrap()
     );
@@ -1190,4 +1204,5 @@ async fn test_passkey_fixture_register_request_verify() {
         .unwrap();
     assert_eq!(updated.sign_count, 1);
     assert!(updated.last_used_at.is_some());
+    assert_eq!(updated.data, result.data);
 }

@@ -4,7 +4,7 @@
 
 ### Passkey 状态消费依赖调用方
 
-WebAuthn 注册、认证、持久化读取、计数器 CAS、`last_used_at` 和错误 challenge 已有真实协议 fixture 测试。bridge 不管理 Session，认证状态的单次保存与消费必须由调用方通过单次凭证存储完成；后续需要在集成层验证原子消费。
+WebAuthn 注册、认证、持久化读取、计数器 CAS、完整凭证状态更新、`last_used_at` 和错误 challenge 已有真实协议 fixture 测试。bridge 不管理 Session，认证状态的单次保存与消费仍必须由调用方通过单次凭证存储完成。
 
 ## P2
 

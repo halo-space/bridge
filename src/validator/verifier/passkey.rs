@@ -112,7 +112,7 @@ impl WebAuthn {
         Ok(Start {
             options: serde_json::to_value(options)
                 .map_err(|e| crate::error::IdpError::Internal(e.to_string()))?,
-            state: serde_json::to_string(&state)
+            state: serde_json::to_string(&AuthState { state, passkeys })
                 .map_err(|e| crate::error::IdpError::Internal(e.to_string()))?,
         })
     }
@@ -120,12 +120,30 @@ impl WebAuthn {
     pub fn verify(&self, input: &str, state: &str) -> Result<Auth> {
         let input: PublicKeyCredential = serde_json::from_str(input)
             .map_err(|e| crate::error::IdpError::WebAuthnError(e.to_string()))?;
-        let state: PasskeyAuthentication = serde_json::from_str(state)
-            .map_err(|e| crate::error::IdpError::WebAuthnError(e.to_string()))?;
+        let (state, passkeys) = match serde_json::from_str::<AuthState>(state) {
+            Ok(state) => (state.state, Some(state.passkeys)),
+            Err(_) => (
+                serde_json::from_str::<PasskeyAuthentication>(state)
+                    .map_err(|e| crate::error::IdpError::WebAuthnError(e.to_string()))?,
+                None,
+            ),
+        };
         let result = self
             .webauthn
             .finish_passkey_authentication(&input, &state)
             .map_err(|e| crate::error::IdpError::WebAuthnError(e.to_string()))?;
+        let data = passkeys
+            .and_then(|passkeys| {
+                passkeys
+                    .into_iter()
+                    .find(|passkey| passkey.cred_id() == result.cred_id())
+            })
+            .map(|mut passkey| {
+                passkey.update_credential(&result);
+                serde_json::to_string(&passkey)
+                    .map_err(|e| crate::error::IdpError::Internal(e.to_string()))
+            })
+            .transpose()?;
         Ok(Auth {
             credential_id: base64::engine::general_purpose::URL_SAFE_NO_PAD
                 .encode(result.cred_id()),
@@ -135,6 +153,7 @@ impl WebAuthn {
             backup_eligible: result.backup_eligible(),
             backup_state: result.backup_state(),
             needs_update: result.needs_update(),
+            data,
         })
     }
 }
@@ -144,6 +163,12 @@ struct RegisterState {
     state: PasskeyRegistration,
     user_handle: String,
     display_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AuthState {
+    state: PasskeyAuthentication,
+    passkeys: Vec<NativePasskey>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -161,6 +186,7 @@ pub struct Auth {
     pub backup_eligible: bool,
     pub backup_state: bool,
     pub needs_update: bool,
+    pub data: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
