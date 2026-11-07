@@ -29,7 +29,7 @@ pub use audit::{AuditEvent, AuditEventType, AuditOutcome};
 pub use error::{IdpError, Result};
 pub use factor::basic::magic::{MagicLinkConfig, MagicLinkPayload, MagicLinkService};
 pub use factor::oidc::{Nonce, Pkce, State};
-pub use pipeline::Pipeline;
+pub use pipeline::{Pipeline, Progress, Step};
 pub use pkg::password::{
     Argon2id, Bcrypt, Password, PasswordAlgorithm, PasswordCodec, Pbkdf2, Sm3,
 };

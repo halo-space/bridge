@@ -56,7 +56,7 @@ Bridge 不保存业务用户，也不执行账号绑定。Provider 只把第三�
 | UserInfo、Introspection、隐式授权 | 待实现 | 当前只保留模型，不在 Discovery 中声明 |
 | Passkey / WebAuthn | 已实现 | 注册、认证、状态标记、计数器 CAS、`last_used_at` 和真实协议 fixture 已覆盖；状态单次消费由调用方存储保证 |
 | Device | 待实现 | 当前只保留模块边界 |
-| Pipeline | 部分实现 | 当前支持认证结果匹配，完整执行编排待补 |
+| Pipeline | 部分实现 | 支持顺序、强度、有效期和追加因子；失败终止由调用方控制 |
 | 风险决策和审计模型 | 已实现 | 由调用方负责持久化和策略接入 |
 
 ## 类型和存储

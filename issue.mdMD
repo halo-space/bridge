@@ -24,9 +24,9 @@ Refresh Token 已完成签名、过期、类型、客户端、rotation 和撤销
 
 `factor/enterprise/device.rs` 当前只有模块占位，没有设备注册、密钥、撤销和认证流程。
 
-### Pipeline 只有结果匹配
+### Pipeline 失败终止边界待明确
 
-当前 Pipeline 只能判断所需认证方式是否已经出现，尚未执行顺序、强度、有效期和失败终止。
+Pipeline 已支持步骤顺序、认证强度、有效期和追加因子。认证因子失败不会进入 Pipeline，当前仍需要明确调用方收到失败结果后的终止策略。
 
 ### OIDC 扩展能力尚未实现
 
