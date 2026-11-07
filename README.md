@@ -52,7 +52,7 @@ Bridge 不保存业务用户，也不执行账号绑定。Provider 只把第三�
 | LDAP | 已实现 | 服务账号绑定、用户搜索、密码绑定、Identity 输出 |
 | SAML | 已实现 | metadata、签名、Issuer、Audience、时间校验、真实 fixture、replay cache 和 SP 状态关联 |
 | 企业微信、钉钉 | 已实现 | 授权码交换和 Identity 输出 |
-| OIDC Authorization Code | 已实现 | state、nonce、PKCE、scope、redirect URI、Refresh Token、撤销 |
+| OIDC Authorization Code | 已实现 | state、nonce、PKCE、scope、redirect URI、Refresh Token、撤销和用户状态检查 |
 | UserInfo、Introspection、隐式授权 | 边界已确定 | 不维护业务用户；调用方用 `verify_live` 组装 Introspection；只支持 Authorization Code + PKCE |
 | Passkey / WebAuthn | 已实现 | 注册、认证、状态标记、计数器 CAS、`last_used_at` 和真实协议 fixture 已覆盖；状态单次消费由调用方存储保证 |
 | Device | 待实现 | 当前只保留模块边界 |

@@ -5,7 +5,7 @@ use bridge::factor::basic::magic::{MagicLinkConfig, MagicLinkService};
 use bridge::factor::oidc;
 use bridge::factor::passkey::Passkey;
 use bridge::pkg::password::{Password, PasswordAlgorithm};
-use bridge::store::{Clients, Passkeys, Secrets};
+use bridge::store::{Clients, Passkeys, Secrets, Users};
 use bridge::types::{AuthUser, OAuthClient};
 use bridge::validator::issuer::CaptchaIssuer;
 use bridge::validator::verifier::captcha::{
@@ -422,6 +422,10 @@ struct MemClients {
     client: OAuthClient,
 }
 
+struct MemUsers {
+    user: AuthUser,
+}
+
 struct MemPasskeys {
     data: Mutex<Vec<(String, String, Passkey)>>,
 }
@@ -437,6 +441,37 @@ impl Clients for MemClients {
             (self.tenant_id == tenant_id && self.client.client_id == client_id)
                 .then(|| self.client.clone()),
         )
+    }
+}
+
+#[async_trait]
+impl Users for MemUsers {
+    async fn find_by_username(
+        &self,
+        _tenant_id: i64,
+        _username: &str,
+    ) -> bridge::Result<Option<AuthUser>> {
+        Ok(None)
+    }
+
+    async fn find_by_phone(
+        &self,
+        _tenant_id: i64,
+        _phone: &str,
+    ) -> bridge::Result<Option<AuthUser>> {
+        Ok(None)
+    }
+
+    async fn find_by_email(
+        &self,
+        _tenant_id: i64,
+        _email: &str,
+    ) -> bridge::Result<Option<AuthUser>> {
+        Ok(None)
+    }
+
+    async fn find_by_id(&self, tenant_id: i64, id: i64) -> bridge::Result<Option<AuthUser>> {
+        Ok((self.user.tenant_id == tenant_id && self.user.id == id).then(|| self.user.clone()))
     }
 }
 
@@ -863,6 +898,7 @@ async fn test_oidc_refresh_rotates_and_revokes_old_token() {
         password_algorithm: None,
         is_active: true,
     };
+    let users = MemUsers { user: user.clone() };
     let (_, refresh) = service.issue_tokens(&user, Some("web".into())).unwrap();
     let request = oidc::TokenRequest {
         grant_type: "refresh_token".into(),
@@ -875,7 +911,7 @@ async fn test_oidc_refresh_rotates_and_revokes_old_token() {
     };
 
     let (_, next_refresh) =
-        oidc::OidcFlow::exchange_refresh_token(&clients, 9, &service, &kv, &request)
+        oidc::OidcFlow::exchange_refresh_token(&clients, &users, 9, &service, &kv, &request)
             .await
             .unwrap();
     assert_ne!(refresh, next_refresh);
@@ -885,10 +921,31 @@ async fn test_oidc_refresh_rotates_and_revokes_old_token() {
             .unwrap()
     );
     assert!(
-        oidc::OidcFlow::exchange_refresh_token(&clients, 9, &service, &kv, &request)
+        oidc::OidcFlow::exchange_refresh_token(&clients, &users, 9, &service, &kv, &request)
             .await
             .is_err()
     );
+
+    let (_, inactive_refresh) = service.issue_tokens(&user, Some("web".into())).unwrap();
+    let mut inactive = user;
+    inactive.is_active = false;
+    let inactive_users = MemUsers { user: inactive };
+    let inactive_request = oidc::TokenRequest {
+        refresh_token: Some(inactive_refresh),
+        ..request
+    };
+    assert!(matches!(
+        oidc::OidcFlow::exchange_refresh_token(
+            &clients,
+            &inactive_users,
+            9,
+            &service,
+            &kv,
+            &inactive_request,
+        )
+        .await,
+        Err(bridge::IdpError::UserDisabled)
+    ));
 }
 
 #[test]

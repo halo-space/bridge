@@ -1,6 +1,6 @@
 use super::pkce::Pkce;
 use crate::error::{IdpError, Result};
-use crate::store::{Clients, Secrets};
+use crate::store::{Clients, Secrets, Users};
 use crate::token::TokenService;
 use crate::types::{AuthCode, OAuthClient};
 use serde::{Deserialize, Serialize};
@@ -245,8 +245,9 @@ impl OidcFlow {
     }
 
     /// 校验并处理 Refresh Token 换发 (grant_type=refresh_token)
-    pub async fn exchange_refresh_token<C: Clients, K: Secrets>(
+    pub async fn exchange_refresh_token<C: Clients, U: Users, K: Secrets>(
         client_store: &C,
+        user_store: &U,
         tenant_id: i64,
         token_service: &TokenService,
         kv: &K,
@@ -298,6 +299,18 @@ impl OidcFlow {
             return Err(IdpError::InvalidClient(
                 "Refresh token client mismatch".into(),
             ));
+        }
+
+        let user_id = claims
+            .sub
+            .parse()
+            .map_err(|_| IdpError::TokenError("Invalid subject".into()))?;
+        let user = user_store
+            .find_by_id(tenant_id, user_id)
+            .await?
+            .ok_or(IdpError::UserNotFound)?;
+        if !user.is_active {
+            return Err(IdpError::UserDisabled);
         }
 
         let tokens = token_service.renew(refresh_token)?;
