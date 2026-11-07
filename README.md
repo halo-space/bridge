@@ -2,6 +2,8 @@
 
 Bridge 是一个面向企业身份认证的 Rust 能力库。它提供基础登录方式、外部身份源、认证材料、OIDC 流程、Token、认证规则和安全审计模型。
 
+完整使用方式见 [USAGE.md](https://github.com/halo-space/bridge/blob/main/USAGE.md)。
+
 发布包名为 `halo-bridge`。由于 crates.io 已有同名 `halo` 包，调用方可以在依赖声明中将它重命名为 `halo`，继续使用统一入口 `halo::bridge`：
 
 ```toml
@@ -153,4 +155,3 @@ cargo bench --bench pipeline
 
 当前测试覆盖基础认证材料、密码算法、Passkey 注册认证 fixture、存储契约和计数器 CAS、OIDC 失败路径、Token rotation、Provider 资料转换以及 SAML 签名、状态关联和重放。
 
-完整使用方式见 [USAGE.md](https://github.com/halo-space/bridge/blob/main/USAGE.md)。项目计划见 [plan.md](https://github.com/halo-space/bridge/blob/main/plan.md)，当前问题见 [issue.md](https://github.com/halo-space/bridge/blob/main/issue.md)。
