@@ -95,7 +95,7 @@
 ## 阶段八：统一扩展能力
 
 - [x] 增加短信 `Sender` 适配器和 Tencent API 3.0 实现
-- [x] 增加 `Extend` 组合自定义 Pipeline 节点
+- [x] 增加 `Fallback` 组合自定义 Pipeline 节点
 - [x] 允许调用方覆盖与内置能力同名的节点实现
 - [x] 按 DAG payload 传递输入，避免分支字段混用
 - [x] 增加 Device nonce 单次消费

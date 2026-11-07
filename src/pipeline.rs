@@ -157,27 +157,27 @@ pub trait Runner: Send + Sync {
 ///
 /// `Extra` 优先处理节点；只有遇到不支持的节点类型时才回退到 `Base`。
 /// 这样调用方可以替换 bridge 的默认实现，也可以增加社交、企业、业务风控或自定义认证方式。
-pub struct Extend<Base, Extra> {
-    pub base: Base,
-    pub extra: Extra,
+pub struct Fallback<Primary, Backup> {
+    pub primary: Primary,
+    pub backup: Backup,
 }
 
-impl<Base, Extra> Extend<Base, Extra> {
-    pub fn new(base: Base, extra: Extra) -> Self {
-        Self { base, extra }
+impl<Primary, Backup> Fallback<Primary, Backup> {
+    pub fn new(primary: Primary, backup: Backup) -> Self {
+        Self { primary, backup }
     }
 }
 
 #[allow(async_fn_in_trait)]
-impl<Base, Extra> Runner for Extend<Base, Extra>
+impl<Primary, Backup> Runner for Fallback<Primary, Backup>
 where
-    Base: Runner,
-    Extra: Runner,
+    Primary: Runner,
+    Backup: Runner,
 {
     async fn run(&self, node: &Node, context: &Context) -> Result<Output> {
-        match self.extra.run(node, context).await {
+        match self.primary.run(node, context).await {
             Err(IdpError::Internal(reason)) if reason.starts_with("Unsupported pipeline") => {
-                self.base.run(node, context).await
+                self.backup.run(node, context).await
             }
             result => result,
         }
@@ -1132,7 +1132,7 @@ mod tests {
     async fn extends_builtin_runner_with_custom_kind() {
         let pipeline = Pipeline::new("custom", vec![Node::effect("custom", "social.custom")]);
         let (mut run, _) = pipeline.start(Context::default()).unwrap();
-        let runner = Extend::new(Unsupported, Custom);
+        let runner = Fallback::new(Custom, Unsupported);
         assert_eq!(
             pipeline.run(&mut run, &runner).await.unwrap(),
             Progress::Done
@@ -1170,7 +1170,7 @@ mod tests {
     async fn custom_runner_overrides_builtin_kind() {
         let pipeline = Pipeline::new("password", vec![Node::effect("password", "password")]);
         let (mut run, _) = pipeline.start(Context::default()).unwrap();
-        let runner = Extend::new(BasePass, Override);
+        let runner = Fallback::new(Override, BasePass);
         assert_eq!(
             pipeline.run(&mut run, &runner).await.unwrap(),
             Progress::Done

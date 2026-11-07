@@ -90,10 +90,10 @@ impl Runner for CompanyPassword {
 }
 ```
 
-Rust 没有传统继承，扩展使用 trait 和组合。`Extend` 会优先执行用户实现，用户实现返回不支持时才回退到 bridge 默认实现：
+Rust 没有传统继承，扩展使用 trait 和组合。`Fallback` 会优先执行用户实现，用户实现返回不支持时才回退到 bridge 默认实现：
 
 ```rust
-let runner = halo::bridge::Extend::new(default_runner, CompanyPassword);
+let runner = halo::bridge::Fallback::new(CompanyPassword, default_runner);
 ```
 
 用户可以覆盖与 bridge 相同的节点类型，也可以增加新的社交、企业或业务节点。
@@ -133,7 +133,7 @@ let sender = SmsSender::with(
 
 `Services` 是 bridge 提供的可选默认适配器，可以直接接入验证码、短信、邮箱、密码、TOTP、Passkey、Device 和审计节点。
 
-它不是能力边界。用户可以完全不用 `Services`，也可以使用 `Extend` 覆盖其中任意节点。
+它不是能力边界。用户可以完全不用 `Services`，也可以使用 `Fallback` 覆盖其中任意节点。
 
 应用层需要实现存储契约：
 

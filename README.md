@@ -101,11 +101,11 @@ pub trait Limits { /* 发送和验证频控 */ }
 
 `Passkeys::update` 使用旧计数器条件更新。调用方在返回失败时处理计数器回退或克隆风险。`Secrets::take_if` 必须由具体存储实现原子 compare-and-delete。
 
-Pipeline 的 `Services` 是 bridge 提供的可选默认适配器，不是能力边界。调用方可以完全替换用户名密码、验证码、TOTP、Passkey、社交和企业认证的实现；`Extend` 会优先使用调用方处理器，再回退到默认适配器。
+Pipeline 的 `Services` 是 bridge 提供的可选默认适配器，不是能力边界。调用方可以完全替换用户名密码、验证码、TOTP、Passkey、社交和企业认证的实现；`Fallback` 会优先使用调用方处理器，再回退到默认适配器。
 
 用户输入通过 `Event::Input` 提交。`Pipeline::run` 自动推进可执行节点，遇到尚未提交的 `Input` 或 `Verify` 节点才返回 `Progress::Need`。
 
-所有可替换节点都通过 trait 扩展。内置短信使用 `SmsSender` 门面和 `Sender` 适配器；腾讯云使用 API 3.0 `SendSms` 与 TC3-HMAC-SHA256，其他供应商可以实现 `Sender` 后通过 `SmsSender::with` 接入。Pipeline 的自定义节点使用 `Runner`，可通过 `Extend` 在保留内置能力的同时增加自己的社交、企业或业务认证逻辑。
+所有可替换节点都通过 trait 扩展。内置短信使用 `SmsSender` 门面和 `Sender` 适配器；腾讯云使用 API 3.0 `SendSms` 与 TC3-HMAC-SHA256，其他供应商可以实现 `Sender` 后通过 `SmsSender::with` 接入。Pipeline 的自定义节点使用 `Runner`，可通过 `Fallback` 在保留内置能力的同时增加自己的社交、企业或业务认证逻辑。
 
 ## 认证材料生命周期
 

@@ -1,4 +1,4 @@
-use halo::bridge::{Context, Event, Extend, Identity, Node, Output, Pipeline, Progress, Runner};
+use halo::bridge::{Context, Event, Fallback, Identity, Node, Output, Pipeline, Progress, Runner};
 use serde_json::Value;
 
 struct Defaults;
@@ -54,7 +54,7 @@ async fn main() -> halo::Result<()> {
             Node::verify("password", "password"),
         ],
     );
-    let runner = Extend::new(Defaults, CompanyPassword);
+    let runner = Fallback::new(CompanyPassword, Defaults);
     let (mut run, _) = pipeline.start(Context::default())?;
     pipeline.resume(
         &mut run,
