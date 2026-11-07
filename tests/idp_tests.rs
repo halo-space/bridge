@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use bridge::factor::basic::magic::{MagicLinkConfig, MagicLinkService};
@@ -428,7 +427,6 @@ struct MemPasskeys {
     data: Mutex<Vec<(String, String, Passkey)>>,
 }
 
-#[async_trait]
 impl Clients for MemClients {
     async fn find_client(
         &self,
@@ -442,7 +440,6 @@ impl Clients for MemClients {
     }
 }
 
-#[async_trait]
 impl Users for MemUsers {
     async fn find_by_username(
         &self,
@@ -481,7 +478,6 @@ impl MemPasskeys {
     }
 }
 
-#[async_trait]
 impl Passkeys for MemPasskeys {
     async fn save(&self, tenant: &str, subject: &str, passkey: Passkey) -> bridge::Result<()> {
         let mut data = self.data.lock().unwrap();
@@ -555,7 +551,6 @@ impl MemSecrets {
     }
 }
 
-#[async_trait]
 impl Secrets for MemSecrets {
     async fn set(&self, key: &str, val: &str, _ttl: u64) -> bridge::Result<()> {
         self.data

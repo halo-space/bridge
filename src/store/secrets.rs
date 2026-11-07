@@ -1,7 +1,5 @@
 use crate::error::Result;
-use async_trait::async_trait;
-
-#[async_trait]
+#[allow(async_fn_in_trait)]
 pub trait Secrets: Send + Sync {
     async fn set(&self, key: &str, val: &str, ttl: u64) -> Result<()>;
     async fn get(&self, key: &str) -> Result<Option<String>>;

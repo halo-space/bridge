@@ -24,7 +24,6 @@ pub mod token;
 pub mod types;
 pub mod validator;
 
-pub use async_trait::async_trait;
 pub use audit::{AuditEvent, AuditEventType, AuditOutcome};
 pub use error::{IdpError, Result};
 pub use factor::basic::magic::{MagicLinkConfig, MagicLinkPayload, MagicLinkService};

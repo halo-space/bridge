@@ -1,8 +1,6 @@
 use crate::error::Result;
 use crate::factor::passkey::Passkey;
-use async_trait::async_trait;
-
-#[async_trait]
+#[allow(async_fn_in_trait)]
 pub trait Passkeys: Send + Sync {
     async fn save(&self, tenant: &str, subject: &str, passkey: Passkey) -> Result<()>;
     async fn find(&self, tenant: &str, credential_id: &str) -> Result<Option<Passkey>>;

@@ -1,8 +1,6 @@
 use crate::error::Result;
 use crate::types::AuthUser;
-use async_trait::async_trait;
-
-#[async_trait]
+#[allow(async_fn_in_trait)]
 pub trait Users: Send + Sync {
     async fn find_by_username(&self, tenant_id: i64, username: &str) -> Result<Option<AuthUser>>;
     async fn find_by_phone(&self, tenant_id: i64, phone: &str) -> Result<Option<AuthUser>>;
