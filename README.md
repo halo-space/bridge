@@ -101,7 +101,7 @@ pub trait Limits { /* 发送和验证频控 */ }
 
 `Passkeys::update` 使用旧计数器条件更新。调用方在返回失败时处理计数器回退或克隆风险。`Secrets::take_if` 必须由具体存储实现原子 compare-and-delete。
 
-Pipeline 的 `Services` 将节点绑定到现有能力：`Issue` 调用 `CodeIssuer` 或 WebAuthn，`Effect` 调用短信、邮件和审计，`Verify` 调用密码、验证码、短信验证码、邮箱验证码、TOTP、Passkey 和设备校验。调用方只提供存储契约和通道配置，不需要在每个节点里重新分派认证逻辑。
+Pipeline 的 `Services` 是 bridge 提供的可选默认适配器，不是能力边界。调用方可以完全替换用户名密码、验证码、TOTP、Passkey、社交和企业认证的实现；`Extend` 会优先使用调用方处理器，再回退到默认适配器。
 
 用户输入通过 `Event::Input` 提交。`Pipeline::run` 自动推进可执行节点，遇到尚未提交的 `Input` 或 `Verify` 节点才返回 `Progress::Need`。
 

@@ -155,8 +155,8 @@ pub trait Runner: Send + Sync {
 
 /// 在内置能力之外组合自定义节点处理器。
 ///
-/// `Base` 先处理 bridge 内置节点；只有遇到不支持的节点类型时才交给 `Extra`。
-/// 这样调用方可以扩展社交、企业、业务风控或自定义认证方式，而不需要复制内置流程。
+/// `Extra` 优先处理节点；只有遇到不支持的节点类型时才回退到 `Base`。
+/// 这样调用方可以替换 bridge 的默认实现，也可以增加社交、企业、业务风控或自定义认证方式。
 pub struct Extend<Base, Extra> {
     pub base: Base,
     pub extra: Extra,
@@ -175,9 +175,9 @@ where
     Extra: Runner,
 {
     async fn run(&self, node: &Node, context: &Context) -> Result<Output> {
-        match self.base.run(node, context).await {
+        match self.extra.run(node, context).await {
             Err(IdpError::Internal(reason)) if reason.starts_with("Unsupported pipeline") => {
-                self.extra.run(node, context).await
+                self.base.run(node, context).await
             }
             result => result,
         }
@@ -568,27 +568,7 @@ impl Pipeline {
     }
 
     fn has_input(&self, run: &Run, node: &Node) -> bool {
-        let Some(value) = run.context.data.get(&node.id) else {
-            return false;
-        };
-        let Kind::Verify(kind) = &node.kind else {
-            return false;
-        };
-        if kind == "captcha" || kind.starts_with("captcha.") {
-            value.get("id").is_some() && value.get("captcha_type").is_some()
-        } else if kind == "passkey" || kind == "webauthn" {
-            value.get("input").is_some() || value.get("credential").is_some()
-        } else if kind == "device" {
-            value.get("signature").is_some() && value.get("device_id").is_some()
-        } else if kind == "password"
-            || kind == "account.password"
-            || kind == "email.password"
-            || kind == "phone.password"
-        {
-            value.get("password").is_some()
-        } else {
-            value.get("code").is_some()
-        }
+        run.context.data.contains_key(&node.id)
     }
 
     fn schedule(&self, run: &mut Run, node_id: &str) -> Result<()> {
@@ -1158,5 +1138,46 @@ mod tests {
             Progress::Done
         );
         assert_eq!(run.context.data["custom"]["custom"], Value::Bool(true));
+    }
+
+    struct BasePass;
+
+    impl Runner for BasePass {
+        async fn run(&self, _node: &Node, _context: &Context) -> Result<Output> {
+            Ok(Output::Pass {
+                routes: Vec::new(),
+                data: serde_json::json!({ "source": "base" }),
+                identity: None,
+                at: 1,
+            })
+        }
+    }
+
+    struct Override;
+
+    impl Runner for Override {
+        async fn run(&self, _node: &Node, _context: &Context) -> Result<Output> {
+            Ok(Output::Pass {
+                routes: Vec::new(),
+                data: serde_json::json!({ "source": "custom" }),
+                identity: None,
+                at: 1,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn custom_runner_overrides_builtin_kind() {
+        let pipeline = Pipeline::new("password", vec![Node::effect("password", "password")]);
+        let (mut run, _) = pipeline.start(Context::default()).unwrap();
+        let runner = Extend::new(BasePass, Override);
+        assert_eq!(
+            pipeline.run(&mut run, &runner).await.unwrap(),
+            Progress::Done
+        );
+        assert_eq!(
+            run.context.data["password"]["source"],
+            Value::String("custom".into())
+        );
     }
 }

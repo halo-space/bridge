@@ -18,7 +18,7 @@ Pipeline 内置 `Services` 已支持 `Effect("audit")` 自动调用 `Events::rec
 
 ### 能力扩展和数据隔离
 
-短信已统一为 `SmsSender` + `Sender` 适配器，Pipeline 已提供 `Extend` 组合自定义节点。节点输入沿 DAG payload 传递，不再依赖全局字段扫描；Device nonce 在 Pipeline 校验时单次消费。
+短信已统一为 `SmsSender` + `Sender` 适配器，所有 Pipeline 节点都可以由调用方通过 `Runner` 实现或覆盖，`Services` 只是可选默认适配器。节点输入沿 DAG payload 传递，不再依赖全局字段扫描；Device nonce 在 Pipeline 校验时单次消费。
 
 ## 文档和测试
 
