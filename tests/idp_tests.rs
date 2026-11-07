@@ -528,6 +528,9 @@ fn test_passkey(id: &str, sign_count: u32) -> Passkey {
         created_at: 1,
         last_used_at: None,
         passwordless: true,
+        user_verified: false,
+        backup_eligible: false,
+        backup_state: false,
         data: Some("{}".into()),
     }
 }
@@ -996,4 +999,95 @@ fn test_custom_claims_token_injection() {
         "Core Infrastructure"
     );
     assert_eq!(claims.custom.get("employee_id").unwrap(), "HALO-999");
+}
+
+#[tokio::test]
+async fn test_passkey_fixture_register_request_verify() {
+    let webauthn = WebAuthn::new(
+        "etools-dev.example.com",
+        "https://etools-dev.example.com:8080",
+        "Halo",
+    )
+    .unwrap();
+    let start = webauthn
+        .issue("00000000-0000-0000-0000-000000000001", "user", "User")
+        .unwrap();
+    let mut state: serde_json::Value = serde_json::from_str(&start.state).unwrap();
+    state["state"]["rs"]["challenge"] =
+        serde_json::Value::String("FQky0FqnmV5KYqFU96E9aApSIRtjXiKcVFUf8Am8iDQ".into());
+
+    let registered = webauthn
+        .register(
+            include_str!("fixtures/passkey_register.json"),
+            &state.to_string(),
+        )
+        .unwrap();
+    assert_eq!(
+        registered.credential_id,
+        "KwlEDOBCBc9P1YU3NWihYLCeY-I9KGMhPap9vwHbVoI"
+    );
+    assert_eq!(registered.sign_count, 0);
+    assert!(registered.user_verified);
+    assert!(!registered.backup_eligible);
+    assert!(!registered.backup_state);
+    assert!(registered.data.is_some());
+
+    let store = MemPasskeys::new();
+    store.save("t1", "s1", registered).await.unwrap();
+    let stored = store
+        .find("t1", "KwlEDOBCBc9P1YU3NWihYLCeY-I9KGMhPap9vwHbVoI")
+        .await
+        .unwrap()
+        .unwrap();
+
+    let auth = webauthn.request(&[stored]).unwrap();
+    let mut auth_state: serde_json::Value = serde_json::from_str(&auth.state).unwrap();
+    auth_state["ast"]["challenge"] =
+        serde_json::Value::String("vXR-a0od0rVjsq3WptR82x2pCToaG3j2V62p0vGZlr0".into());
+
+    let result = webauthn
+        .verify(
+            include_str!("fixtures/passkey_auth.json"),
+            &auth_state.to_string(),
+        )
+        .unwrap();
+    assert_eq!(
+        result.credential_id,
+        "KwlEDOBCBc9P1YU3NWihYLCeY-I9KGMhPap9vwHbVoI"
+    );
+    assert_eq!(result.counter, 1);
+    assert!(result.user_verified);
+    assert!(!result.backup_eligible);
+    assert!(!result.backup_state);
+    assert!(result.needs_update);
+
+    let mut replay_state = auth_state.clone();
+    replay_state["ast"]["challenge"] = serde_json::Value::String("invalid".into());
+    assert!(
+        webauthn
+            .verify(
+                include_str!("fixtures/passkey_auth.json"),
+                &replay_state.to_string(),
+            )
+            .is_err()
+    );
+
+    assert!(
+        store
+            .update(
+                "t1",
+                "KwlEDOBCBc9P1YU3NWihYLCeY-I9KGMhPap9vwHbVoI",
+                0,
+                result.counter,
+            )
+            .await
+            .unwrap()
+    );
+    let updated = store
+        .find("t1", "KwlEDOBCBc9P1YU3NWihYLCeY-I9KGMhPap9vwHbVoI")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(updated.sign_count, 1);
+    assert!(updated.last_used_at.is_some());
 }

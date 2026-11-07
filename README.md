@@ -54,7 +54,7 @@ Bridge 不保存业务用户，也不执行账号绑定。Provider 只把第三�
 | 企业微信、钉钉 | 已实现 | 授权码交换和 Identity 输出 |
 | OIDC Authorization Code | 已实现 | state、nonce、PKCE、scope、redirect URI、Refresh Token、撤销 |
 | UserInfo、Introspection、隐式授权 | 待实现 | 当前只保留模型，不在 Discovery 中声明 |
-| Passkey / WebAuthn | 部分实现 | 协议验签、数据模型、Store 契约已完成，真实 fixture 待补 |
+| Passkey / WebAuthn | 已实现 | 注册、认证、状态标记、计数器 CAS、`last_used_at` 和真实协议 fixture 已覆盖；状态单次消费由调用方存储保证 |
 | Device | 待实现 | 当前只保留模块边界 |
 | Pipeline | 部分实现 | 当前支持认证结果匹配，完整执行编排待补 |
 | 风险决策和审计模型 | 已实现 | 由调用方负责持久化和策略接入 |
@@ -111,6 +111,6 @@ cargo check
 cargo test
 ```
 
-当前测试覆盖基础认证材料、密码算法、Passkey 存储契约、OIDC 失败路径、Token rotation、Provider 资料转换和 SAML 配置边界。
+当前测试覆盖基础认证材料、密码算法、Passkey 注册认证 fixture、存储契约和计数器 CAS、OIDC 失败路径、Token rotation、Provider 资料转换和 SAML 配置边界。
 
 后续工作见 [plan.md](plan.md)，当前问题见 [issue.mdMD](issue.mdMD)。

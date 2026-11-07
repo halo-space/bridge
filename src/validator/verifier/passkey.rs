@@ -71,6 +71,8 @@ impl WebAuthn {
             .map_err(|e| crate::error::IdpError::WebAuthnError(e.to_string()))?;
         let data = serde_json::to_string(&passkey)
             .map_err(|e| crate::error::IdpError::Internal(e.to_string()))?;
+        let info: NativeInfo = serde_json::from_str(&data)
+            .map_err(|e| crate::error::IdpError::Internal(e.to_string()))?;
         let public_key = serde_json::to_string(passkey.get_public_key())
             .map_err(|e| crate::error::IdpError::Internal(e.to_string()))?;
         Ok(StoredPasskey {
@@ -85,6 +87,9 @@ impl WebAuthn {
             created_at: Utc::now().timestamp(),
             last_used_at: None,
             passwordless: false,
+            user_verified: info.cred.user_verified,
+            backup_eligible: info.cred.backup_eligible,
+            backup_state: info.cred.backup_state,
             data: Some(data),
         })
     }
@@ -126,6 +131,10 @@ impl WebAuthn {
                 .encode(result.cred_id()),
             counter: result.counter(),
             at: Utc::now().timestamp(),
+            user_verified: result.user_verified(),
+            backup_eligible: result.backup_eligible(),
+            backup_state: result.backup_state(),
+            needs_update: result.needs_update(),
         })
     }
 }
@@ -148,4 +157,24 @@ pub struct Auth {
     pub credential_id: String,
     pub counter: u32,
     pub at: i64,
+    pub user_verified: bool,
+    pub backup_eligible: bool,
+    pub backup_state: bool,
+    pub needs_update: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct NativeInfo {
+    #[serde(default)]
+    cred: CredentialInfo,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct CredentialInfo {
+    #[serde(default)]
+    user_verified: bool,
+    #[serde(default)]
+    backup_eligible: bool,
+    #[serde(default)]
+    backup_state: bool,
 }

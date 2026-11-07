@@ -28,12 +28,12 @@
 
 ## 阶段一：Passkey 完整闭环
 
-- [ ] 增加真实 WebAuthn 注册 fixture
-- [ ] 增加真实 WebAuthn 认证 fixture
-- [ ] 验证重复 Credential ID 和计数器竞争
-- [ ] 明确 `last_used_at`、backup 状态和重放处理
+- [x] 增加真实 WebAuthn 注册 fixture
+- [x] 增加真实 WebAuthn 认证 fixture
+- [x] 验证重复 Credential ID 和计数器竞争
+- [x] 明确 `last_used_at`、backup 状态和重放处理
 
-验收条件是注册、认证、持久化读取和计数器更新都能通过真实协议数据测试。
+验收条件是注册、认证、持久化读取和计数器更新都能通过真实协议数据测试。`Passkey` 保存注册时的用户验证和备份标记，`Auth` 返回认证时的最新标记和 `needs_update`。计数器与 `last_used_at` 由 `Passkeys::update` 条件更新。认证状态必须由调用方以单次凭证保存并消费，bridge 不管理 Session；错误 challenge 已有失败测试。
 
 ## 阶段二：SAML 完整闭环
 

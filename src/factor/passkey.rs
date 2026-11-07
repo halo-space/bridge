@@ -17,6 +17,12 @@ pub struct Passkey {
     pub last_used_at: Option<i64>,
     #[serde(default)]
     pub passwordless: bool,
+    #[serde(default)]
+    pub user_verified: bool,
+    #[serde(default)]
+    pub backup_eligible: bool,
+    #[serde(default)]
+    pub backup_state: bool,
     /// `webauthn-rs` 标准 Passkey 序列化数据。
     #[serde(default)]
     pub data: Option<String>,
@@ -45,6 +51,9 @@ mod tests {
             created_at: 1,
             last_used_at: None,
             passwordless: false,
+            user_verified: false,
+            backup_eligible: false,
+            backup_state: false,
             data: None,
         }
     }
