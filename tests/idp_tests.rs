@@ -5,13 +5,14 @@ use bridge::factor::basic::magic::{MagicLinkConfig, MagicLinkService};
 use bridge::factor::oidc;
 use bridge::factor::passkey::Passkey;
 use bridge::pkg::password::{Password, PasswordAlgorithm};
-use bridge::store::{Clients, OAuthClient, Passkeys, Secrets};
+use bridge::store::{Clients, Passkeys, Secrets};
+use bridge::types::{AuthUser, OAuthClient};
 use bridge::validator::issuer::CaptchaIssuer;
 use bridge::validator::verifier::captcha::{
     CaptchaType, CaptchaVerifier, CaptchaVerifyReq, ClickCaptcha, ImageCaptcha, RotateCaptcha,
     SliderCaptcha, TargetPoint,
 };
-use bridge::{WebAuthn, factor, store, token};
+use bridge::{WebAuthn, factor, token};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -237,7 +238,7 @@ fn test_token_issue_and_verify() {
         3600,
         86400,
     );
-    let user = store::AuthUser {
+    let user = AuthUser {
         id: 10001,
         tenant_id: 1000000000000001,
         username: "admin".into(),
@@ -296,7 +297,7 @@ fn test_token_issue_and_verify_rs256_and_jwks() {
         &pub_pem_str,
     );
 
-    let user = store::AuthUser {
+    let user = AuthUser {
         id: 20002,
         tenant_id: 1000000000000001,
         username: "rs256_user".into(),
@@ -806,7 +807,7 @@ async fn test_oidc_refresh_rotates_and_revokes_old_token() {
         },
     };
     let service = token::TokenService::new("refresh-secret-32-bytes-long-enough", "halo", 60, 600);
-    let user = store::AuthUser {
+    let user = AuthUser {
         id: 7,
         tenant_id: 9,
         username: "user".into(),
@@ -966,7 +967,7 @@ fn test_custom_claims_token_injection() {
         3600,
         86400,
     );
-    let user = bridge::store::AuthUser {
+    let user = AuthUser {
         id: 20001,
         tenant_id: 1000000000000001,
         username: "developer".into(),
