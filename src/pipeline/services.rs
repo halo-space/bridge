@@ -10,7 +10,7 @@ use crate::validator::issuer::{CaptchaIssuer, CodeIssuer};
 use crate::validator::sender::NotificationService;
 use crate::validator::verifier::WebAuthn;
 use crate::validator::verifier::captcha::{CaptchaType, CaptchaVerifier, CaptchaVerifyReq};
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 
 /// Pipeline 的内置节点能力。
 ///
@@ -134,24 +134,22 @@ where
         })))
     }
 
-    async fn send(&self, context: &Context, kind: &str) -> Result<Output> {
+    async fn send(&self, node: &Node, context: &Context, kind: &str) -> Result<Output> {
+        let data = node_data(context, node)?;
         let channel = if kind.contains("email") {
             "email"
         } else if kind.contains("sms") {
             "sms"
         } else {
-            latest_issue(context)
-                .and_then(|value| value.get("channel"))
+            data.get("channel")
                 .and_then(Value::as_str)
                 .ok_or_else(|| IdpError::Internal("Missing notification channel".into()))?
         };
-        let issue = latest_issue(context)
-            .ok_or_else(|| IdpError::Internal("Missing code issue result".into()))?;
-        let target = issue
+        let target = data
             .get("target")
             .and_then(Value::as_str)
             .ok_or_else(|| IdpError::Internal("Missing code target".into()))?;
-        let key = issue
+        let key = data
             .get("key")
             .and_then(Value::as_str)
             .ok_or_else(|| IdpError::Internal("Missing code key".into()))?;
@@ -160,10 +158,7 @@ where
             .get(key)
             .await?
             .ok_or(IdpError::VerificationCodeExpired)?;
-        let scene = issue
-            .get("scene")
-            .and_then(Value::as_str)
-            .unwrap_or("login");
+        let scene = data.get("scene").and_then(Value::as_str).unwrap_or("login");
         self.notify
             .send_verification_code(target, &code, scene, self.code_ttl)
             .await?;
@@ -260,7 +255,7 @@ where
         if kind == "device" {
             return self.verify_device(context, &data).await;
         }
-        Err(IdpError::Internal(format!(
+        Err(IdpError::Unsupported(format!(
             "Unsupported pipeline verifier: {kind}"
         )))
     }
@@ -405,7 +400,7 @@ where
             }
             return Ok(pass(Value::Null));
         }
-        Err(IdpError::Internal(format!(
+        Err(IdpError::Unsupported(format!(
             "Unsupported pipeline check: {kind}"
         )))
     }
@@ -420,7 +415,7 @@ where
             "passkey.success" | "passkey_auth_success" => AuditEventType::PasskeyAuthSuccess,
             "passkey.failed" | "passkey_auth_failed" => AuditEventType::PasskeyAuthFailed,
             _ => {
-                return Err(IdpError::Internal(format!(
+                return Err(IdpError::Unsupported(format!(
                     "Unsupported pipeline audit: {kind}"
                 )));
             }
@@ -463,9 +458,9 @@ where
                     || kind == "sms"
                     || kind == "email" =>
             {
-                self.send(context, kind).await
+                self.send(node, context, kind).await
             }
-            Kind::Effect(kind) => Err(IdpError::Internal(format!(
+            Kind::Effect(kind) => Err(IdpError::Unsupported(format!(
                 "Unsupported pipeline effect: {kind}"
             ))),
         }
@@ -496,7 +491,7 @@ fn channel(kind: &str) -> Result<&'static str> {
     } else if kind == "email" || kind == "code.email" {
         Ok("email")
     } else {
-        Err(IdpError::Internal(format!(
+        Err(IdpError::Unsupported(format!(
             "Unsupported pipeline issuer: {kind}"
         )))
     }
@@ -508,7 +503,7 @@ fn captcha_type(kind: &str) -> Result<CaptchaType> {
         "slider" => Ok(CaptchaType::Slider),
         "rotate" => Ok(CaptchaType::Rotate),
         "click" => Ok(CaptchaType::Click),
-        _ => Err(IdpError::Internal(format!(
+        _ => Err(IdpError::Unsupported(format!(
             "Unsupported pipeline captcha: {kind}"
         ))),
     }
@@ -545,23 +540,4 @@ fn target(context: &Context, node: &Node, channel: &str) -> Result<String> {
         }
     }
     Err(IdpError::AuthFailed(format!("Missing field: {key}")))
-}
-
-fn latest_issue(context: &Context) -> Option<&Map<String, Value>> {
-    context
-        .evidence
-        .iter()
-        .rev()
-        .find_map(|evidence| {
-            let object = evidence.data.as_object()?;
-            object.get("key")?.as_str()?;
-            Some(object)
-        })
-        .or_else(|| {
-            context.data.values().rev().find_map(|value| {
-                let object = value.as_object()?;
-                object.get("key")?.as_str()?;
-                Some(object)
-            })
-        })
 }

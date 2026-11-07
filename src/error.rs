@@ -70,6 +70,9 @@ pub enum IdpError {
 
     #[error("Internal error: {0}")]
     Internal(String),
+
+    #[error("Unsupported capability: {0}")]
+    Unsupported(String),
 }
 
 pub type Result<T> = std::result::Result<T, IdpError>;

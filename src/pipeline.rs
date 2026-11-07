@@ -114,7 +114,15 @@ impl Node {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Context {
     pub tenant_id: i64,
+    #[serde(default)]
+    pub protocol: Option<String>,
+    #[serde(default)]
+    pub connection: Option<String>,
     pub identity: Option<Identity>,
+    #[serde(default)]
+    pub request: Value,
+    #[serde(default)]
+    pub meta: Map<String, Value>,
     pub data: Map<String, Value>,
     pub evidence: Vec<Evidence>,
 }
@@ -161,12 +169,16 @@ pub enum Output {
 /// 调用方提供的节点执行器。执行器内部调用现有 issuer、sender、verifier 和 factor。
 #[allow(async_fn_in_trait)]
 pub trait Runner: Send + Sync {
+    fn supports(&self, _node: &Node) -> bool {
+        true
+    }
+
     async fn run(&self, node: &Node, context: &Context) -> Result<Output>;
 }
 
 /// 在内置能力之外组合自定义节点处理器。
 ///
-/// `Extra` 优先处理节点；只有遇到不支持的节点类型时才回退到 `Base`。
+/// `Primary` 优先处理节点；只有遇到不支持的节点类型时才回退到 `Backup`。
 /// 这样调用方可以替换 bridge 的默认实现，也可以增加社交、企业、业务风控或自定义认证方式。
 pub struct Fallback<Primary, Backup> {
     pub primary: Primary,
@@ -185,11 +197,13 @@ where
     Primary: Runner,
     Backup: Runner,
 {
+    fn supports(&self, node: &Node) -> bool {
+        self.primary.supports(node) || self.backup.supports(node)
+    }
+
     async fn run(&self, node: &Node, context: &Context) -> Result<Output> {
         match self.primary.run(node, context).await {
-            Err(IdpError::Internal(reason)) if reason.starts_with("Unsupported pipeline") => {
-                self.backup.run(node, context).await
-            }
+            Err(IdpError::Unsupported(_)) => self.backup.run(node, context).await,
             result => result,
         }
     }
@@ -216,6 +230,10 @@ pub struct Run {
     /// 每个活动节点沿 DAG 继承的输入快照，避免不同分支混用数据。
     #[serde(default)]
     pub payloads: BTreeMap<String, Value>,
+    #[serde(default)]
+    pub pipeline_version: u16,
+    #[serde(default)]
+    pub pipeline_hash: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -242,6 +260,10 @@ pub struct Pipeline {
     nodes: BTreeMap<String, Node>,
     max_steps: u32,
     #[serde(default)]
+    config_version: u16,
+    #[serde(default)]
+    config_hash: Option<String>,
+    #[serde(default)]
     invalid: Option<String>,
 }
 
@@ -259,12 +281,20 @@ impl Pipeline {
             start: start.into(),
             nodes: mapped,
             max_steps: DEFAULT_MAX_STEPS,
+            config_version: 0,
+            config_hash: None,
             invalid,
         }
     }
 
-    pub fn from_config(config: PipelineConfig) -> Result<Self> {
-        config.compile()
+    pub fn from_config(config: PipelineConfig, cards: &Cards) -> Result<Self> {
+        config.compile_with(cards)
+    }
+
+    pub(crate) fn stamp(mut self, version: u16, hash: String) -> Self {
+        self.config_version = version;
+        self.config_hash = Some(hash);
+        self
     }
 
     pub fn max_steps(mut self, max_steps: u32) -> Self {
@@ -321,6 +351,8 @@ impl Pipeline {
             denied: None,
             submitted: BTreeSet::new(),
             payloads: BTreeMap::new(),
+            pipeline_version: self.config_version,
+            pipeline_hash: self.config_hash.clone(),
         };
         self.schedule(&mut run, &self.start)?;
         let progress = self.advance(&mut run)?;
@@ -329,6 +361,9 @@ impl Pipeline {
 
     pub fn resume(&self, run: &mut Run, event: Event) -> Result<Progress> {
         self.validate()?;
+        if run.pipeline_version != self.config_version || run.pipeline_hash != self.config_hash {
+            return Err(IdpError::AuthFailed("Pipeline version mismatch".into()));
+        }
         let Some(current) = run.current.clone() else {
             return Ok(self.advance(run)?);
         };
@@ -384,6 +419,14 @@ impl Pipeline {
                     let payload = merge_data(Some(inherited), run.context.data[&current].clone());
                     run.payloads.insert(target.clone(), payload.clone());
                     run.context.data.insert(target.clone(), payload);
+                    if matches!(node.kind, Kind::Input)
+                        && self
+                            .nodes
+                            .get(&target)
+                            .is_some_and(|next| matches!(next.kind, Kind::Verify(_)))
+                    {
+                        run.submitted.insert(target.clone());
+                    }
                     self.arrive(run, &current, &target, false)?;
                 }
                 self.advance(run)
@@ -481,6 +524,9 @@ impl Pipeline {
             .nodes
             .get(&node_id)
             .ok_or_else(|| IdpError::Internal(format!("Pipeline node not found: {node_id}")))?;
+        if !runner.supports(node) {
+            return Err(IdpError::Unsupported(format!("{}", node.id)));
+        }
         let output = runner.run(node, &run.context).await?;
         let event = match output {
             Output::Pass {
@@ -518,9 +564,7 @@ impl Pipeline {
                 .get(&current)
                 .ok_or_else(|| IdpError::Internal(format!("Pipeline node not found: {current}")))?;
             let waiting = matches!(node.kind, Kind::Input)
-                || (matches!(node.kind, Kind::Verify(_))
-                    && !run.submitted.contains(&current)
-                    && !self.has_input(run, node));
+                || (matches!(node.kind, Kind::Verify(_)) && !run.submitted.contains(&current));
             if waiting {
                 return Ok(self.need(&current));
             }
@@ -530,8 +574,7 @@ impl Pipeline {
                     if run.current.as_deref() == Some(node.as_str())
                         && (matches!(self.nodes[node.as_str()].kind, Kind::Input)
                             || (matches!(self.nodes[node.as_str()].kind, Kind::Verify(_))
-                                && !run.submitted.contains(node)
-                                && !self.has_input(run, &self.nodes[node.as_str()]))) =>
+                                && !run.submitted.contains(node))) =>
                 {
                     return Ok(progress);
                 }
@@ -580,10 +623,6 @@ impl Pipeline {
             kind,
             fields,
         }
-    }
-
-    fn has_input(&self, run: &Run, node: &Node) -> bool {
-        run.context.data.contains_key(&node.id)
     }
 
     fn schedule(&self, run: &mut Run, node_id: &str) -> Result<()> {
@@ -1123,7 +1162,7 @@ mod tests {
 
     impl Runner for Unsupported {
         async fn run(&self, node: &Node, _context: &Context) -> Result<Output> {
-            Err(IdpError::Internal(format!(
+            Err(IdpError::Unsupported(format!(
                 "Unsupported pipeline verifier: {}",
                 node.id
             )))

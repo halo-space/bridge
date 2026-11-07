@@ -100,6 +100,17 @@
 - [x] 按 DAG payload 传递输入，避免分支字段混用
 - [x] 增加 Device nonce 单次消费
 
+## 阶段九：配置执行闭环
+
+- [x] 页面配置使用 `PipelineConfig` 和固定 `type/code/args` 结构
+- [x] 使用 `Cards` 校验已注册能力码和必需参数
+- [x] 自定义 Runner 通过 `node.args` 获取页面参数
+- [x] Run 绑定 Pipeline 配置版本和 hash
+- [x] Verify 节点区分用户输入和上游继承数据
+- [x] Effect 节点按当前 payload 读取数据，避免并行分支混用
+- [ ] 增加每个 Card 的完整参数 Schema 和页面 Schema 导出
+- [ ] 增加节点超时、幂等键和副作用重试策略
+
 结论：`verify_token` 只做签名和 Claims 校验；需要实时状态的请求统一使用 `verify_live`。Refresh Token 换发通过 `Users` 检查租户、用户存在和 `is_active`，bridge 不维护用户数据。RSA 使用 `from_private_pem` 加载持久化密钥，`private_key_pem` 导出，`rotate` 显式轮换；全局生成只作为默认兼容入口。短信和邮件 sender 的 `strict` 模式用于生产失败闭环，关闭时保留开发 Mock 行为。Events 使用 `event.id` 幂等，并支持 trace/request 字段；写入失败由存储实现返回错误。
 
 ## 验收命令

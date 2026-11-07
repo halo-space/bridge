@@ -5,7 +5,7 @@ struct Defaults;
 
 impl Runner for Defaults {
     async fn run(&self, node: &Node, _context: &Context) -> halo::Result<Output> {
-        Err(halo::IdpError::Internal(format!(
+        Err(halo::IdpError::Unsupported(format!(
             "Unsupported pipeline node: {}",
             node.id
         )))
@@ -17,7 +17,7 @@ struct CompanyPassword;
 impl Runner for CompanyPassword {
     async fn run(&self, node: &Node, context: &Context) -> halo::Result<Output> {
         if node.kind != halo::bridge::Kind::Verify("password".into()) {
-            return Err(halo::IdpError::Internal(format!(
+            return Err(halo::IdpError::Unsupported(format!(
                 "Unsupported pipeline node: {}",
                 node.id
             )));
@@ -66,6 +66,18 @@ async fn main() -> halo::Result<()> {
                 "tenant": "acme"
             }),
             at: 1,
+        },
+    )?;
+    pipeline.resume(
+        &mut run,
+        Event::Input {
+            node: "password".into(),
+            data: serde_json::json!({
+                "username": "alice",
+                "password": "company-secret",
+                "tenant": "acme"
+            }),
+            at: 2,
         },
     )?;
     let progress = pipeline.run(&mut run, &runner).await?;

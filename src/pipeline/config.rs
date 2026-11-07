@@ -2,6 +2,7 @@ use super::{Edge, Join, Node, Pipeline};
 use crate::error::{IdpError, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -63,13 +64,15 @@ impl PipelineConfig {
         self.clone().compile()
     }
 
-    pub fn compile(self) -> Result<Pipeline> {
+    pub(crate) fn compile(self) -> Result<Pipeline> {
         if self.version != 1 {
             return Err(IdpError::Internal(format!(
                 "Unsupported pipeline config version: {}",
                 self.version
             )));
         }
+        let version = self.version;
+        let hash = config_hash(&self)?;
         let nodes = self
             .nodes
             .into_iter()
@@ -80,8 +83,17 @@ impl PipelineConfig {
             pipeline = pipeline.max_steps(max_steps);
         }
         pipeline.validate()?;
-        Ok(pipeline)
+        Ok(pipeline.stamp(version, hash))
     }
+}
+
+fn config_hash(config: &PipelineConfig) -> Result<String> {
+    let data = serde_json::to_vec(config)
+        .map_err(|e| IdpError::Internal(format!("Serialize pipeline config failed: {e}")))?;
+    Ok(Sha256::digest(data)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
 }
 
 impl NodeConfig {
@@ -112,7 +124,7 @@ impl NodeConfig {
 /// 页面配置发布前使用的能力码表。未注册的 code 不允许发布。
 #[derive(Debug, Clone, Default)]
 pub struct Cards {
-    values: BTreeMap<Op, BTreeSet<String>>,
+    values: BTreeMap<Op, BTreeMap<String, BTreeSet<String>>>,
 }
 
 #[cfg(test)]
@@ -173,14 +185,26 @@ impl Cards {
     }
 
     pub fn add(mut self, op: Op, code: impl Into<String>) -> Self {
-        self.values.entry(op).or_default().insert(code.into());
+        self.values
+            .entry(op)
+            .or_default()
+            .entry(code.into())
+            .or_default();
+        self
+    }
+
+    pub fn args(mut self, op: Op, code: impl Into<String>, fields: Vec<String>) -> Self {
+        self.values
+            .entry(op)
+            .or_default()
+            .insert(code.into(), fields.into_iter().collect());
         self
     }
 
     pub fn supports(&self, op: Op, code: &str) -> bool {
         self.values
             .get(&op)
-            .is_some_and(|cards| cards.contains(code))
+            .is_some_and(|cards| cards.contains_key(code))
     }
 
     pub fn validate(&self, config: &PipelineConfig) -> Result<()> {
@@ -194,6 +218,20 @@ impl Cards {
                     "Pipeline capability is not registered: {:?}/{}",
                     node.op, code
                 )));
+            }
+            let required = self
+                .values
+                .get(&node.op)
+                .and_then(|cards| cards.get(code))
+                .cloned()
+                .unwrap_or_default();
+            for field in required {
+                if node.args.get(&field).is_none() {
+                    return Err(IdpError::Internal(format!(
+                        "Pipeline capability argument is missing: {:?}/{} -> {}",
+                        node.op, code, field
+                    )));
+                }
             }
         }
         Ok(())

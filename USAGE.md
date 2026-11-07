@@ -56,6 +56,8 @@ let pipeline: Pipeline = config.compile_with(&cards)?;
 
 `code` 只代表约定的能力，具体实现仍由调用方的 `Runner` 提供。`args` 会保存在节点上，用户实现可以通过 `node.args` 读取。
 
+`Run` 会保存配置版本和 hash。恢复运行时必须使用同一份 Pipeline，配置重新发布后不会接管旧流程。
+
 ```rust
 use halo::bridge::{Context, Event, Node, Pipeline, Progress};
 
