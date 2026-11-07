@@ -129,6 +129,26 @@ pub enum Event {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Output {
+    Pass {
+        routes: Vec<String>,
+        data: Value,
+        identity: Option<Identity>,
+        at: i64,
+    },
+    Fail {
+        reason: String,
+        retry: bool,
+    },
+}
+
+/// 调用方提供的节点执行器。执行器内部调用现有 issuer、sender、verifier 和 factor。
+#[allow(async_fn_in_trait)]
+pub trait Runner: Send + Sync {
+    async fn run(&self, node: &Node, context: &Context) -> Result<Output>;
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Run {
     pub context: Context,
     pub current: Option<String>,
@@ -340,6 +360,39 @@ impl Pipeline {
                 self.advance(run)
             }
         }
+    }
+
+    /// 执行当前节点一次，并把执行结果交回 DAG 状态机。
+    pub async fn execute<R: Runner>(&self, run: &mut Run, runner: &R) -> Result<Progress> {
+        let node_id = run
+            .current
+            .clone()
+            .ok_or_else(|| IdpError::Internal("Pipeline has no current node".into()))?;
+        let node = self
+            .nodes
+            .get(&node_id)
+            .ok_or_else(|| IdpError::Internal(format!("Pipeline node not found: {node_id}")))?;
+        let output = runner.run(node, &run.context).await?;
+        let event = match output {
+            Output::Pass {
+                routes,
+                data,
+                identity,
+                at,
+            } => Event::Pass {
+                node: node_id,
+                routes,
+                data,
+                identity,
+                at,
+            },
+            Output::Fail { reason, retry } => Event::Fail {
+                node: node_id,
+                reason,
+                retry,
+            },
+        };
+        self.resume(run, event)
     }
 
     fn advance(&self, run: &mut Run) -> Result<Progress> {
@@ -733,5 +786,38 @@ mod tests {
             )
             .unwrap();
         assert!(matches!(progress, Progress::Deny { .. }));
+    }
+
+    struct Pass;
+
+    impl Runner for Pass {
+        async fn run(&self, _node: &Node, _context: &Context) -> Result<Output> {
+            Ok(Output::Pass {
+                routes: Vec::new(),
+                data: Value::Null,
+                identity: None,
+                at: 1,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn executes_nodes_through_runner() {
+        let pipeline = Pipeline::new(
+            "input",
+            vec![
+                Node::input("input", vec!["phone".into()]).edge(None::<String>, "verify"),
+                Node::verify("verify", "captcha"),
+            ],
+        );
+        let (mut run, _) = pipeline.start(Context::default()).unwrap();
+        assert!(matches!(
+            pipeline.execute(&mut run, &Pass).await.unwrap(),
+            Progress::Need { ref node, .. } if node == "verify"
+        ));
+        assert_eq!(
+            pipeline.execute(&mut run, &Pass).await.unwrap(),
+            Progress::Done
+        );
     }
 }
