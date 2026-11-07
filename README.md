@@ -30,6 +30,8 @@ src/
 └── error.rs                # 统一错误类型
 ```
 
+根目录 `examples/` 提供 Pipeline 组合和执行示例。
+
 `factor/oidc` 同时承载外部 OIDC 登录 Provider 和 OAuth/OIDC 流程参数。`factor/enterprise` 保留 LDAP、SAML、企业微信和钉钉等企业专属身份源。
 
 ## 核心边界
@@ -104,6 +106,18 @@ OIDC 相关代码位于 `factor/oidc`：
 - `provider/` 负责外部 OIDC Claims 到 `Identity` 的转换
 
 Discovery 只声明当前已经实现的 Authorization Code、PKCE、JWKS 和撤销能力。
+
+## Pipeline 示例
+
+```bash
+cargo run --example pipeline_linear
+cargo run --example pipeline_graph
+cargo run --example pipeline_runner
+```
+
+- `pipeline_linear`：手机号验证码、密码加 TOTP、密码加 Passkey
+- `pipeline_graph`：风险分支、All 汇聚、Any 汇聚
+- `pipeline_runner`：调用方 Runner 执行节点
 
 ## 验证
 
