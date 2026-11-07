@@ -218,7 +218,7 @@ cargo test
 | 图形验证码、恢复码、Magic Link | 已实现 | 由 `validator` 和 `pkg` 提供生命周期能力 |
 | Passkey / WebAuthn | 部分实现 | 协议验签和存储契约已完成，完整应用闭环待补测试 |
 | GitHub、飞书 | 已实现 | 支持授权码交换和资料标准化 |
-| Google、微信 | 部分实现 | 当前提供授权地址和资料解析 |
+| Google、微信 | 已实现 | 支持授权地址、授权码交换和资料解析，真实网络集成测试待补齐 |
 | LDAP | 已实现 | 支持服务账号绑定、用户搜索、用户密码绑定和 `Identity` 输出 |
 | SAML | 部分实现 | `SamlAuth` 已接入元数据、签名、Issuer、Audience 和时间窗口校验，真实 IdP fixture 与重放存储测试待补齐 |
 | Device | 待实现 | 当前只保留模块边界 |
