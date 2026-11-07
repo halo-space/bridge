@@ -1,8 +1,16 @@
 [package]
-name = "bridge"
+name = "halo-bridge"
 version = "0.1.0"
 edition = "2024"
 description = "Halo Core Identity Provider, Multi-factor Authentication & OIDC Protocol Engine"
+license = "Apache-2.0"
+repository = "https://github.com/halo-space/bridge"
+readme = "README.md"
+keywords = ["identity", "authentication", "oidc", "webauthn", "mfa"]
+categories = ["authentication", "web-programming"]
+
+[lib]
+name = "halo"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }

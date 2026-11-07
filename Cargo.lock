@@ -311,38 +311,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bridge"
-version = "0.1.0"
-dependencies = [
- "argon2",
- "base64 0.22.1",
- "bcrypt",
- "chrono",
- "digest 0.10.7",
- "hmac 0.12.1",
- "jsonwebtoken",
- "ldap3",
- "lettre",
- "pbkdf2 0.12.2",
- "qrcode",
- "rand_core 0.6.4",
- "reqwest",
- "rsa 0.9.10",
- "saml",
- "serde",
- "serde_json",
- "sha1 0.10.7",
- "sha2 0.10.9",
- "sm3",
- "thiserror 2.0.21",
- "tokio",
- "tracing",
- "url",
- "uuid",
- "webauthn-rs",
-]
-
-[[package]]
 name = "bs58"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1264,6 +1232,38 @@ dependencies = [
  "cfg-if",
  "crunchy",
  "zerocopy",
+]
+
+[[package]]
+name = "halo-bridge"
+version = "0.1.0"
+dependencies = [
+ "argon2",
+ "base64 0.22.1",
+ "bcrypt",
+ "chrono",
+ "digest 0.10.7",
+ "hmac 0.12.1",
+ "jsonwebtoken",
+ "ldap3",
+ "lettre",
+ "pbkdf2 0.12.2",
+ "qrcode",
+ "rand_core 0.6.4",
+ "reqwest",
+ "rsa 0.9.10",
+ "saml",
+ "serde",
+ "serde_json",
+ "sha1 0.10.7",
+ "sha2 0.10.9",
+ "sm3",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "url",
+ "uuid",
+ "webauthn-rs",
 ]
 
 [[package]]

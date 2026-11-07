@@ -1,10 +1,10 @@
-use bridge::{Context, Node, Output, Pipeline, Progress, Runner};
+use halo::bridge::{Context, Node, Output, Pipeline, Progress, Runner};
 use serde_json::Value;
 
 struct Demo;
 
 impl Runner for Demo {
-    async fn run(&self, node: &Node, _context: &Context) -> bridge::Result<Output> {
+    async fn run(&self, node: &Node, _context: &Context) -> halo::bridge::Result<Output> {
         let data = match node.id.as_str() {
             "phone" => serde_json::json!({"phone": "13800138000"}),
             "captcha" => serde_json::json!({"passed": true}),
@@ -23,7 +23,7 @@ impl Runner for Demo {
 }
 
 #[tokio::main]
-async fn main() -> bridge::Result<()> {
+async fn main() -> halo::bridge::Result<()> {
     let pipeline = Pipeline::new(
         "phone",
         vec![

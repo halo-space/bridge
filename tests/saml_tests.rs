@@ -1,5 +1,5 @@
 use base64::Engine as _;
-use bridge::factor::enterprise::{SamlAuth, SamlConfig};
+use halo::factor::enterprise::{SamlAuth, SamlConfig};
 use saml::attribute::Attribute;
 use saml::authn_context::AuthnContextClassRef;
 use saml::binding::{Binding, Dispatch, Endpoint, SsoResponseDispatch, SsoResponseEndpoint};

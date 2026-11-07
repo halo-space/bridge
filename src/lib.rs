@@ -51,3 +51,30 @@ pub use validator::verifier::captcha::{CaptchaChallenge, CaptchaType, CaptchaVer
 pub use validator::verifier::{
     Recovery as RecoveryVerifier, Start, Totp as TotpVerifier, WebAuthn,
 };
+
+/// 对外统一命名空间：`halo::bridge::*`。
+pub mod bridge {
+    pub use crate::audit;
+    pub use crate::error;
+    pub use crate::factor;
+    pub use crate::pipeline;
+    pub use crate::pkg;
+    pub use crate::risk;
+    pub use crate::rules;
+    pub use crate::store;
+    pub use crate::token;
+    pub use crate::types;
+    pub use crate::validator;
+
+    pub use crate::{
+        Algorithm, Argon2id, AuditEvent, AuditEventType, AuditOutcome, Bcrypt, CaptchaChallenge,
+        CaptchaIssuer, CaptchaType, CaptchaVerifier, CaptchaVerifyReq, Clients, CodeIssuer, Codec,
+        Context, Edge, Event, Events, Factors, Identity, IdpError, Join, Kind, Limits, Method,
+        Node, Nonce, NotificationService, OAuthClient, Output, Passcode, Passkeys, Password,
+        Pbkdf2, Pipeline, Progress, Reauth, RecoveryCode, RecoveryIssuer, RecoveryVerifier, Result,
+        RiskAssessment, RiskConfig, RiskDecision, RiskEngine, Run, Runner, Scene, Secrets, Sm3,
+        SmsConfig, SmsSender, SmtpConfig, SmtpSender, Start, State, Totp, TotpIssuer, TotpVerifier,
+        Users, WebAuthn,
+    };
+    pub use crate::{AuthCode, AuthResult, AuthUser, Level, Rules, TotpBinding};
+}

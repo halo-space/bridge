@@ -1,17 +1,17 @@
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use bridge::factor::basic::magic::{MagicLinkConfig, MagicLinkService};
-use bridge::factor::oidc;
-use bridge::factor::passkey::Passkey;
-use bridge::pkg::password::{Algorithm, Password};
-use bridge::store::{Clients, Passkeys, Secrets, Users};
-use bridge::types::{AuthUser, OAuthClient};
-use bridge::validator::issuer::CaptchaIssuer;
-use bridge::validator::verifier::captcha::{
+use halo::factor::basic::magic::{MagicLinkConfig, MagicLinkService};
+use halo::factor::oidc;
+use halo::factor::passkey::Passkey;
+use halo::pkg::password::{Algorithm, Password};
+use halo::store::{Clients, Passkeys, Secrets, Users};
+use halo::types::{AuthUser, OAuthClient};
+use halo::validator::issuer::CaptchaIssuer;
+use halo::validator::verifier::captcha::{
     CaptchaType, CaptchaVerifier, CaptchaVerifyReq, ClickCaptcha, ImageCaptcha, RotateCaptcha,
     SliderCaptcha, TargetPoint,
 };
-use bridge::{WebAuthn, factor, token};
+use halo::{WebAuthn, factor, token};
 use saml::InMemoryReplayCache;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -20,22 +20,21 @@ use std::sync::{Arc, Mutex};
 #[test]
 fn test_password_hash_and_verify() {
     let raw = "admin123";
-    let hash =
-        bridge::pkg::password::Password::hash(raw, bridge::pkg::password::Algorithm::Argon2id)
-            .expect("hash failed");
+    let hash = halo::pkg::password::Password::hash(raw, halo::pkg::password::Algorithm::Argon2id)
+        .expect("hash failed");
     assert!(
-        bridge::pkg::password::Password::verify(
+        halo::pkg::password::Password::verify(
             raw,
             &hash,
-            bridge::pkg::password::Algorithm::Argon2id,
+            halo::pkg::password::Algorithm::Argon2id,
         )
         .expect("verify failed")
     );
     assert!(
-        !bridge::pkg::password::Password::verify(
+        !halo::pkg::password::Password::verify(
             "WrongSecret",
             &hash,
-            bridge::pkg::password::Algorithm::Argon2id,
+            halo::pkg::password::Algorithm::Argon2id,
         )
         .expect("verify failed")
     );
@@ -119,7 +118,7 @@ fn test_password_algorithms_and_unknown_code() {
 
 #[test]
 fn test_rsa_crypto_decrypt() {
-    use bridge::pkg::rsa::RsaCrypto;
+    use halo::pkg::rsa::RsaCrypto;
     let pem = RsaCrypto::global().get_public_key_pem();
     assert!(pem.contains("-----BEGIN PUBLIC KEY-----"));
 
@@ -432,7 +431,7 @@ impl Clients for MemClients {
         &self,
         tenant_id: i64,
         client_id: &str,
-    ) -> bridge::Result<Option<OAuthClient>> {
+    ) -> halo::Result<Option<OAuthClient>> {
         Ok(
             (self.tenant_id == tenant_id && self.client.client_id == client_id)
                 .then(|| self.client.clone()),
@@ -445,27 +444,19 @@ impl Users for MemUsers {
         &self,
         _tenant_id: i64,
         _username: &str,
-    ) -> bridge::Result<Option<AuthUser>> {
+    ) -> halo::Result<Option<AuthUser>> {
         Ok(None)
     }
 
-    async fn find_by_phone(
-        &self,
-        _tenant_id: i64,
-        _phone: &str,
-    ) -> bridge::Result<Option<AuthUser>> {
+    async fn find_by_phone(&self, _tenant_id: i64, _phone: &str) -> halo::Result<Option<AuthUser>> {
         Ok(None)
     }
 
-    async fn find_by_email(
-        &self,
-        _tenant_id: i64,
-        _email: &str,
-    ) -> bridge::Result<Option<AuthUser>> {
+    async fn find_by_email(&self, _tenant_id: i64, _email: &str) -> halo::Result<Option<AuthUser>> {
         Ok(None)
     }
 
-    async fn find_by_id(&self, tenant_id: i64, id: i64) -> bridge::Result<Option<AuthUser>> {
+    async fn find_by_id(&self, tenant_id: i64, id: i64) -> halo::Result<Option<AuthUser>> {
         Ok((self.user.tenant_id == tenant_id && self.user.id == id).then(|| self.user.clone()))
     }
 }
@@ -479,13 +470,13 @@ impl MemPasskeys {
 }
 
 impl Passkeys for MemPasskeys {
-    async fn save(&self, tenant: &str, subject: &str, passkey: Passkey) -> bridge::Result<()> {
+    async fn save(&self, tenant: &str, subject: &str, passkey: Passkey) -> halo::Result<()> {
         let mut data = self.data.lock().unwrap();
         if data
             .iter()
             .any(|(_, _, stored)| stored.credential_id == passkey.credential_id)
         {
-            return Err(bridge::IdpError::StoreError(
+            return Err(halo::IdpError::StoreError(
                 "Credential ID already exists".into(),
             ));
         }
@@ -493,7 +484,7 @@ impl Passkeys for MemPasskeys {
         Ok(())
     }
 
-    async fn find(&self, tenant: &str, credential_id: &str) -> bridge::Result<Option<Passkey>> {
+    async fn find(&self, tenant: &str, credential_id: &str) -> halo::Result<Option<Passkey>> {
         Ok(self
             .data
             .lock()
@@ -505,7 +496,7 @@ impl Passkeys for MemPasskeys {
             .map(|(_, _, passkey)| passkey.clone()))
     }
 
-    async fn list(&self, tenant: &str, subject: &str) -> bridge::Result<Vec<Passkey>> {
+    async fn list(&self, tenant: &str, subject: &str) -> halo::Result<Vec<Passkey>> {
         Ok(self
             .data
             .lock()
@@ -524,7 +515,7 @@ impl Passkeys for MemPasskeys {
         credential_id: &str,
         old_count: u32,
         next: Passkey,
-    ) -> bridge::Result<bool> {
+    ) -> halo::Result<bool> {
         let mut data = self.data.lock().unwrap();
         let Some((_, _, passkey)) = data.iter_mut().find(|(stored_tenant, _, passkey)| {
             stored_tenant == tenant && passkey.credential_id == credential_id
@@ -552,7 +543,7 @@ impl MemSecrets {
 }
 
 impl Secrets for MemSecrets {
-    async fn set(&self, key: &str, val: &str, _ttl: u64) -> bridge::Result<()> {
+    async fn set(&self, key: &str, val: &str, _ttl: u64) -> halo::Result<()> {
         self.data
             .lock()
             .unwrap()
@@ -560,15 +551,15 @@ impl Secrets for MemSecrets {
         Ok(())
     }
 
-    async fn get(&self, key: &str) -> bridge::Result<Option<String>> {
+    async fn get(&self, key: &str) -> halo::Result<Option<String>> {
         Ok(self.data.lock().unwrap().get(key).cloned())
     }
 
-    async fn take(&self, key: &str) -> bridge::Result<Option<String>> {
+    async fn take(&self, key: &str) -> halo::Result<Option<String>> {
         Ok(self.data.lock().unwrap().remove(key))
     }
 
-    async fn take_if(&self, key: &str, expected: &str) -> bridge::Result<bool> {
+    async fn take_if(&self, key: &str, expected: &str) -> halo::Result<bool> {
         let mut data = self.data.lock().unwrap();
         if data.get(key).map(String::as_str) != Some(expected) {
             return Ok(false);
@@ -577,7 +568,7 @@ impl Secrets for MemSecrets {
         Ok(true)
     }
 
-    async fn del(&self, key: &str) -> bridge::Result<()> {
+    async fn del(&self, key: &str) -> halo::Result<()> {
         self.data.lock().unwrap().remove(key);
         Ok(())
     }
@@ -945,13 +936,13 @@ async fn test_oidc_refresh_rotates_and_revokes_old_token() {
             &inactive_request,
         )
         .await,
-        Err(bridge::IdpError::UserDisabled)
+        Err(halo::IdpError::UserDisabled)
     ));
 }
 
 #[test]
 fn test_password_policy_and_strength() {
-    let policy = bridge::rules::password::Policy::default();
+    let policy = halo::rules::password::Policy::default();
 
     // 强密码验证通过
     assert!(
@@ -972,33 +963,33 @@ fn test_password_policy_and_strength() {
     // 强度评估
     assert_eq!(
         policy.assess_strength("123"),
-        bridge::rules::password::Strength::Weak
+        halo::rules::password::Strength::Weak
     );
     assert_eq!(
         policy.assess_strength("Secure@2026!Halo"),
-        bridge::rules::password::Strength::Strong
+        halo::rules::password::Strength::Strong
     );
 }
 
 #[test]
 fn test_lockout_policy() {
-    let policy = bridge::rules::lockout::Policy::default();
+    let policy = halo::rules::lockout::Policy::default();
 
     // 0 次失败允许登录
     assert_eq!(
         policy.evaluate(0, None),
-        bridge::rules::lockout::Decision::Allow
+        halo::rules::lockout::Decision::Allow
     );
 
     // 3 次失败触发验证码
     assert_eq!(
         policy.evaluate(3, None),
-        bridge::rules::lockout::Decision::RequireCaptcha
+        halo::rules::lockout::Decision::RequireCaptcha
     );
 
     // 5 次失败锁定账号
     match policy.evaluate(5, None) {
-        bridge::rules::lockout::Decision::Locked { remaining_seconds } => {
+        halo::rules::lockout::Decision::Locked { remaining_seconds } => {
             assert_eq!(remaining_seconds, 900);
         }
         _ => panic!("Expected locked decision"),
@@ -1008,35 +999,35 @@ fn test_lockout_policy() {
 #[test]
 fn test_totp_and_recovery_codes() {
     // 1. 生成秘钥与绑定链接
-    let secret = bridge::pkg::totp::Totp::generate_secret();
+    let secret = halo::pkg::totp::Totp::generate_secret();
     assert!(!secret.is_empty());
     let uri =
-        bridge::pkg::totp::Totp::generate_otpauth_uri("HaloIAM", "user@halo.run", &secret).unwrap();
+        halo::pkg::totp::Totp::generate_otpauth_uri("HaloIAM", "user@halo.run", &secret).unwrap();
     assert!(uri.starts_with("otpauth://totp/HaloIAM:user@halo.run"));
 
     // 2. 生成动态口令与核验
     let now = chrono::Utc::now().timestamp() as u64;
-    let code = bridge::pkg::totp::Totp::generate_code(&secret, now).unwrap();
+    let code = halo::pkg::totp::Totp::generate_code(&secret, now).unwrap();
     assert_eq!(code.len(), 6);
-    assert!(bridge::pkg::totp::Totp::verify_code(&secret, &code, now).unwrap());
-    assert!(!bridge::pkg::totp::Totp::verify_code(&secret, "000000", now).unwrap());
+    assert!(halo::pkg::totp::Totp::verify_code(&secret, &code, now).unwrap());
+    assert!(!halo::pkg::totp::Totp::verify_code(&secret, "000000", now).unwrap());
 
     // 3. 应急恢复码
-    let batch = bridge::pkg::recovery::RecoveryCode::generate_batch(5);
+    let batch = halo::pkg::recovery::RecoveryCode::generate_batch(5);
     assert_eq!(batch.len(), 5);
     let hashes: Vec<String> = batch
         .iter()
-        .map(|c| bridge::pkg::recovery::RecoveryCode::hash_code(c))
+        .map(|c| halo::pkg::recovery::RecoveryCode::hash_code(c))
         .collect();
 
     // 正确消费一个恢复码
     let consumed_hash =
-        bridge::pkg::recovery::RecoveryCode::verify_and_consume(&batch[0], &hashes).unwrap();
+        halo::pkg::recovery::RecoveryCode::verify_and_consume(&batch[0], &hashes).unwrap();
     assert_eq!(consumed_hash, hashes[0]);
 
     // 错误恢复码拦截
     assert!(
-        bridge::pkg::recovery::RecoveryCode::verify_and_consume("INVALID-CODE", &hashes).is_err()
+        halo::pkg::recovery::RecoveryCode::verify_and_consume("INVALID-CODE", &hashes).is_err()
     );
 
     // 4. 用户专属 Salt 强绑定派生测试
@@ -1044,10 +1035,10 @@ fn test_totp_and_recovery_codes() {
     let salt1 = "a1b2c3d4e5f60718293a4b5c6d7e8f90";
     let salt2 = "ffffffffffffffffffffffffffffffff";
 
-    let secret_u1_s1 = bridge::pkg::totp::Totp::derive_secret_with_salt(user_id, salt1);
-    let secret_u1_s1_repeat = bridge::pkg::totp::Totp::derive_secret_with_salt(user_id, salt1);
-    let secret_u1_s2 = bridge::pkg::totp::Totp::derive_secret_with_salt(user_id, salt2);
-    let secret_u2_s1 = bridge::pkg::totp::Totp::derive_secret_with_salt(user_id + 1, salt1);
+    let secret_u1_s1 = halo::pkg::totp::Totp::derive_secret_with_salt(user_id, salt1);
+    let secret_u1_s1_repeat = halo::pkg::totp::Totp::derive_secret_with_salt(user_id, salt1);
+    let secret_u1_s2 = halo::pkg::totp::Totp::derive_secret_with_salt(user_id, salt2);
+    let secret_u2_s1 = halo::pkg::totp::Totp::derive_secret_with_salt(user_id + 1, salt1);
 
     // 确定性：相同用户 + 相同盐派生出的秘钥严格一致
     assert_eq!(secret_u1_s1, secret_u1_s1_repeat);
@@ -1057,20 +1048,16 @@ fn test_totp_and_recovery_codes() {
     assert_ne!(secret_u1_s1, secret_u2_s1);
 
     // 强绑定秘钥正常参与 TOTP 生成与核验
-    let code_salt = bridge::pkg::totp::Totp::generate_code(&secret_u1_s1, now).unwrap();
-    assert!(bridge::pkg::totp::Totp::verify_code(&secret_u1_s1, &code_salt, now).unwrap());
+    let code_salt = halo::pkg::totp::Totp::generate_code(&secret_u1_s1, now).unwrap();
+    assert!(halo::pkg::totp::Totp::verify_code(&secret_u1_s1, &code_salt, now).unwrap());
     // 拿另一个盐派生的秘钥核验必然失败
-    assert!(!bridge::pkg::totp::Totp::verify_code(&secret_u1_s2, &code_salt, now).unwrap());
+    assert!(!halo::pkg::totp::Totp::verify_code(&secret_u1_s2, &code_salt, now).unwrap());
 }
 
 #[test]
 fn test_custom_claims_token_injection() {
-    let service = bridge::token::TokenService::new(
-        "my-32-byte-secret-key-1234567890",
-        "halo-idp",
-        3600,
-        86400,
-    );
+    let service =
+        halo::token::TokenService::new("my-32-byte-secret-key-1234567890", "halo-idp", 3600, 86400);
     let user = AuthUser {
         id: 20001,
         tenant_id: 1000000000000001,

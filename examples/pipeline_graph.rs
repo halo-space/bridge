@@ -1,4 +1,4 @@
-use bridge::{Context, Event, Join, Node, Pipeline, Progress};
+use halo::bridge::{Context, Event, Join, Node, Pipeline, Progress};
 use serde_json::Value;
 
 fn pass(node: &str, routes: &[&str]) -> Event {
@@ -52,7 +52,7 @@ fn any_factor() -> Pipeline {
     )
 }
 
-fn run(pipeline: &Pipeline, events: Vec<Event>) -> bridge::Result<Progress> {
+fn run(pipeline: &Pipeline, events: Vec<Event>) -> halo::bridge::Result<Progress> {
     let (mut run, mut progress) = pipeline.start(Context::default())?;
     for event in events {
         progress = pipeline.resume(&mut run, event)?;
@@ -60,7 +60,7 @@ fn run(pipeline: &Pipeline, events: Vec<Event>) -> bridge::Result<Progress> {
     Ok(progress)
 }
 
-fn main() -> bridge::Result<()> {
+fn main() -> halo::bridge::Result<()> {
     let normal = run(
         &risk_branch(),
         vec![pass("password", &["normal"]), pass("audit", &[])],

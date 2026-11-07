@@ -1,4 +1,4 @@
-use bridge::{Context, Event, Node, Pipeline, Progress};
+use halo::bridge::{Context, Event, Node, Pipeline, Progress};
 use serde_json::json;
 
 fn pass(node: &str, data: serde_json::Value) -> Event {
@@ -11,7 +11,7 @@ fn pass(node: &str, data: serde_json::Value) -> Event {
     }
 }
 
-fn run(pipeline: &Pipeline, events: Vec<Event>) -> bridge::Result<Progress> {
+fn run(pipeline: &Pipeline, events: Vec<Event>) -> halo::bridge::Result<Progress> {
     let (mut run, mut progress) = pipeline.start(Context::default())?;
     for event in events {
         progress = pipeline.resume(&mut run, event)?;
@@ -54,7 +54,7 @@ fn password_passkey() -> Pipeline {
     )
 }
 
-fn main() -> bridge::Result<()> {
+fn main() -> halo::bridge::Result<()> {
     let phone = phone_code();
     let phone_result = run(
         &phone,
