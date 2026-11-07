@@ -131,11 +131,15 @@ Discovery 只声明当前已经实现的 Authorization Code、PKCE、JWKS 和撤
 cargo run --example pipeline_linear
 cargo run --example pipeline_graph
 cargo run --example pipeline_runner
+cargo run --example pipeline_custom
+cargo run --example sender_custom
 ```
 
 - `pipeline_linear`：手机号验证码、密码加 TOTP、密码加 Passkey
 - `pipeline_graph`：风险分支、All 汇聚、Any 汇聚
 - `pipeline_runner`：调用方 Runner 执行节点
+- `pipeline_custom`：用户自己的用户名密码实现覆盖默认节点
+- `sender_custom`：用户自己的短信供应商适配器
 
 基于内置能力的完整手机号验证码流程见 `tests/pipeline_services.rs`，覆盖滑块校验、验证码签发、短信发送、短信校验和审计写入。
 
