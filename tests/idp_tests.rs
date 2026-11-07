@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use bridge::factor::basic::magic::{MagicLinkConfig, MagicLinkService};
+use bridge::factor::oidc;
 use bridge::factor::passkey::Passkey;
 use bridge::pkg::password::{Password, PasswordAlgorithm};
 use bridge::store::{Clients, OAuthClient, Passkeys, Secrets};
@@ -10,7 +11,7 @@ use bridge::validator::verifier::captcha::{
     CaptchaType, CaptchaVerifier, CaptchaVerifyReq, ClickCaptcha, ImageCaptcha, RotateCaptcha,
     SliderCaptcha, TargetPoint,
 };
-use bridge::{WebAuthn, factor, oidc, store, token};
+use bridge::{WebAuthn, factor, store, token};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

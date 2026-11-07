@@ -1,6 +1,7 @@
 use crate::error::{IdpError, Result};
 use crate::pkg::password::Password;
-use crate::store::{AuthUser, Users};
+use crate::store::Users;
+use crate::types::AuthUser;
 use crate::types::{AuthResult, Level, Method};
 
 /// 手机号 + 密码登录。

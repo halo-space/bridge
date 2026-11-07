@@ -11,7 +11,7 @@ use sha2::Sha256;
 use sm3::Sm3 as Sm3Hash;
 
 use crate::error::{IdpError, Result};
-use crate::store::AuthUser;
+use crate::types::AuthUser;
 
 /// 密码存储算法。算法标识由应用层随凭证保存，便于逐步升级历史密码。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

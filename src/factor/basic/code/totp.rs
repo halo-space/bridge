@@ -1,5 +1,6 @@
 use crate::error::{IdpError, Result};
-use crate::store::{AuthUser, Factors, Users};
+use crate::store::{Factors, Users};
+use crate::types::AuthUser;
 use crate::types::{AuthResult, Level, Method};
 use crate::validator::verifier::totp::Totp;
 

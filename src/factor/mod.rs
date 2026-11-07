@@ -2,5 +2,6 @@
 
 pub mod basic;
 pub mod enterprise;
+pub mod oidc;
 pub mod passkey;
 pub mod social;

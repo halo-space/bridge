@@ -65,7 +65,7 @@
 - `state`、`nonce`、PKCE 归 `oidc`
 - 底层算法归 `pkg`
 - 本地存储和第三方发送由调用方实现
-- 每次改动保持 `cargo test -p idp` 通过
+- 每次改动保持 `cargo test` 通过
 
 ## 待完成的核心迁移
 
@@ -137,4 +137,4 @@
 - [ ] 检查所有外部输入是否有长度、格式和过期校验
 - [ ] 检查所有 Provider 是否避免本地账号维护
 - [ ] 检查所有公开命名是否简洁、职责单一
-- [ ] 固定 `cargo check -p idp` 和 `cargo test -p idp` 作为验收命令
+- [ ] 固定 `cargo check` 和 `cargo test` 作为验收命令

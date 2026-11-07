@@ -39,7 +39,7 @@ verifier    校验用户提交的验证码、TOTP、恢复码、Passkey 等材�
 
 1. **零数据库耦合 (Trait-driven Architecture)**
    - `bridge` 为纯领域逻辑与协议层，不绑定 PostgreSQL、MySQL 或任何特定 ORM。
-   - 所有数据持久化、多租户检索、凭证读取与缓存核销通过 `store.rs` 中的异步 Trait（`Users`、`Factors`、`Clients`、`Secrets`、`Limits`、`Passkeys`、`Events`）抽象，由宿主应用按需注入实现。
+   - 所有数据持久化、多租户检索、凭证读取与缓存核销通过 `store/` 中按能力拆分的异步 Trait（`Users`、`Factors`、`Clients`、`Secrets`、`Limits`、`Passkeys`、`Events`）抽象，由宿主应用按需注入实现。
 
 2. **多租户隔离可注入 (Multi-tenant Ready)**
    - 用户、TOTP、Passkey 和审计接口携带租户上下文；其他数据的租户边界由宿主应用在 Store 实现中约束。
@@ -57,7 +57,7 @@ verifier    校验用户提交的验证码、TOTP、恢复码、Passkey 等材�
 src/
 ├── lib.rs                   # 统一导出入口与核心类型门面
 ├── error.rs                 # 统一错误枚举 (IdpError) 与 Result 定义
-├── store.rs                 # 核心数据模型与 7 大异步持久化 Trait 契约
+├── store/                   # 异步持久化 Trait 契约，按能力拆分
 ├── risk.rs                  # 自适应风控引擎（异地瞬移、新设备/IP、暴力破解评分）
 ├── audit.rs                 # 安全审计事件标准（对齐 SOC 2 / 等保 2.0 三级标准）
 ├── factor/                  # 登录因子
@@ -66,6 +66,7 @@ src/
 │   │   └── code/            # 邮箱、短信、TOTP 登录
 │   ├── social/              # 社交快捷登录
 │   ├── enterprise/          # 企业身份源与设备登录
+│   ├── oidc/                # OIDC / OAuth2 登录因子与协议流程
 │   └── passkey.rs           # WebAuthn / Passkey
 ├── validator/              # 认证材料能力
 │   ├── issuer/              # 签发
@@ -81,9 +82,8 @@ src/
 │   ├── rsa.rs               # RSA-OAEP 解密与密钥管理
 │   └── totp.rs              # TOTP 算法
 ├── rules/                  # 认证规则
-├── token/                   # 令牌中心 (JWT RS256/HS256 签发、动态 Claims、JWKS 导出)
-├── types.rs                 # 公共认证类型
-└── oidc/                    # OIDC & OAuth 2.0 协议引擎 (PKCE、Refresh Token、撤销)
+├── token/                   # 令牌中心，按 Claims、JWT 服务和 JWKS 拆分
+└── types/                  # 公共认证类型，按身份、认证、OAuth 和因子拆分
 ```
 
 ---
@@ -104,13 +104,13 @@ src/
 - **`factor/enterprise/`**：
   - `dingtalk.rs`：钉钉统一免密登录，服务端 Code 换取 `userAccessToken` 并提取企业员工档案。
   - `wecom.rs`：企业微信网页与内嵌登录，通过 `corpid` + `corpsecret` 换取成员唯一 `userid`。
-  - `ldap.rs`：企业现有 LDAP / Active Directory 目录服务的配置抽象与认证对接。
-  - `saml.rs`：SAML 2.0 WebSSO 单点登录数据模型与断言配置。
+  - `ldap.rs`：企业现有 LDAP / Active Directory 目录服务的连接、搜索和密码认证。
+  - `saml/`：SAML 配置、断言模型和协议校验。
 - **`factor/passkey.rs`**：持久化 Passkey 模型。
 - **`validator/verifier/passkey.rs`**：`WebAuthn` 协议实现，负责标准注册、认证验签、RP/origin 校验和计数器结果。
 
-### 2. 认证材料校验 (`src/validator/verifier/`；OIDC 参数位于 `src/oidc/`)
-- **`validator/verifier/captcha/mod.rs`**：人机验证码校验和 `captcha_token` 单次消费。
+### 2. 认证材料校验 (`src/validator/verifier/`；OIDC 位于 `src/factor/oidc/`)
+- **`validator/verifier/captcha/`**：人机验证码模型、校验服务和四类验证码实现。
 - **`validator/verifier/passcode.rs`**：短信、邮箱验证码校验和单次消费。
 - **`validator/verifier/totp.rs`**：TOTP 动态口令校验。
 - **`validator/verifier/recovery.rs`**：恢复码校验和消费。
@@ -132,18 +132,19 @@ src/
   - 密文存储：仅持久化 SHA-256 哈希散列，单次消费立即销毁。
 
 ### 4. 令牌中心与公钥服务 (`src/token/`)
-- **`token/jwt.rs`**：
+- **`token/service.rs`**：
   - 支持 **RS256**（非对称私钥签名/公钥验签）与 **HS256**（对称秘钥）自适应双模式；
   - 签发带类型标记的 Access Token 与 Refresh Token，并支持动态扩展声明；
   - 支持精确验证 Audience、Issuer、过期时间、Token 类型和实时撤销状态。
+- **`token/claims.rs`**：Access、Refresh 和 ID Token 的 Claims 模型。
 - **`token/jwks.rs`**：
   - RFC 7517 标准规范输出；
   - 支持从 RSA 公钥或组件一键导出 `/.well-known/jwks.json`（Base64URL 格式的模数 `n` 与指数 `e`），微服务无需共享私钥即可独立校验。
 
-### 5. OIDC / OAuth 2.0 协议引擎 (`src/oidc/`)
-- **`oidc/server.rs`**：RFC 8414 标准 Discovery 元数据模型（`/.well-known/openid-configuration`），端点自适应拼接。
+### 5. OIDC / OAuth 2.0 协议引擎 (`src/factor/oidc/`)
+- **`factor/oidc/server.rs`**：RFC 8414 标准 Discovery 元数据模型（`/.well-known/openid-configuration`），端点自适应拼接。
 - 当前 Discovery 只声明已实现的 Authorization Code、PKCE、JWKS 和撤销能力；UserInfo、Introspection 和隐式授权仍是数据模型或后续能力。
-- **`oidc/flow.rs`**：
+- **`factor/oidc/flow.rs`**：
   - RFC 7636 **PKCE** 防拦截校验（原生支持 `S256` SHA-256 与 `plain` 模式）；
   - OAuth `state` 和 OIDC `nonce` 的流程绑定与校验；
   - 标准 Authorization Code 授权码生成、暂存与防重放单次兑换；严格校验 grant type、redirect URI、scope、客户端密钥和公共客户端 PKCE；
@@ -178,7 +179,7 @@ src/
 
 ---
 
-## 四、 存储接口契约体系 (`src/store.rs`)
+## 四、 存储接口契约体系 (`src/store/`)
 
 宿主应用只需针对持久化层实现对应 Trait 即可插拔运行：
 
@@ -197,7 +198,7 @@ pub trait Events: Send + Sync { ... }    // 安全事件日志持久化
 
 Crate 包含完整的单元测试与集成测试矩阵：
 ```bash
-cargo test -p idp
+cargo test
 ```
 - **13 项模块单元测试**：覆盖 SMTP 配置自适应、自适应风控评分决策、Magic Link 防篡改与时效检测、短信签名与统一通知路由等。
 - **15 项系统级集成测试**：覆盖多种密码算法、RSA 密文解密、多社交平台授权 URL 解析、RS256 JWT 与 JWKS 动态导出、PKCE S256 算法、授权码 nonce 与防提前消费、四大类行为人机验证码全闭环、魔术链接单次消费、TOTP 容差计算与恢复码批量哈希。

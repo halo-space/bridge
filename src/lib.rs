@@ -7,7 +7,7 @@
 //! - `validator`: 认证材料能力（issuer、sender、verifier）
 //! - `rules`: 认证规则（密码复杂度和登录锁定）
 //! - `token`: 令牌生成与校验（JWT Claims 签发、动态扩展 Claims、JWKS 公钥导出）
-//! - `oidc`: OIDC / OAuth2 协议引擎（发现、授权码、PKCE、state、nonce）
+//! - `factor::oidc`: OIDC / OAuth2 登录因子（发现、授权码、PKCE、state、nonce）
 //! - `store`: 存储契约 Trait（零数据库硬依赖，由外部调用方按需实现）
 //! - `risk`: 自适应风险风控决策引擎（异地登录、设备指纹、暴力尝试自适应 Step-up MFA 与阻断）
 //! - `audit`: 企业级安全审计事件标准（对齐 SOC 2 / 等保 2.0 三级标准）
@@ -15,7 +15,6 @@
 pub mod audit;
 pub mod error;
 pub mod factor;
-pub mod oidc;
 pub mod pipeline;
 pub mod pkg;
 pub mod risk;
@@ -29,7 +28,7 @@ pub use async_trait::async_trait;
 pub use audit::{AuditEvent, AuditEventType, AuditOutcome};
 pub use error::{IdpError, Result};
 pub use factor::basic::magic::{MagicLinkConfig, MagicLinkPayload, MagicLinkService};
-pub use oidc::{Nonce, Pkce, State};
+pub use factor::oidc::{Nonce, Pkce, State};
 pub use pipeline::Pipeline;
 pub use pkg::password::{
     Argon2id, Bcrypt, Password, PasswordAlgorithm, PasswordCodec, Pbkdf2, Sm3,
@@ -39,8 +38,10 @@ pub use pkg::rsa::RsaCrypto;
 pub use pkg::totp::Totp;
 pub use risk::{RiskAssessment, RiskConfig, RiskDecision, RiskEngine, UserHistory};
 pub use rules::{LockoutDecision, LockoutPolicy, PasswordPolicy, PasswordStrength, Reauth, Rules};
-pub use store::{Clients, Events, Factors, Limits, Passkeys, Secrets, TotpBinding, Users};
-pub use types::{AuthResult, Identity, Level, Method};
+pub use store::{Clients, Events, Factors, Limits, Passkeys, Secrets, Users};
+pub use types::{
+    AuthCode, AuthResult, AuthUser, Identity, Level, Method, OAuthClient, TotpBinding,
+};
 pub use validator::issuer::{CaptchaIssuer, CodeIssuer, RecoveryIssuer, Scene, TotpIssuer};
 pub use validator::sender::{NotificationService, NotifyChannel};
 pub use validator::sender::{SmsConfig, SmsSender};
