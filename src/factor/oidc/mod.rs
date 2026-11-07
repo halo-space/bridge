@@ -1,6 +1,7 @@
 pub mod flow;
 pub mod nonce;
 pub mod pkce;
+pub mod provider;
 pub mod server;
 pub mod state;
 
@@ -21,3 +22,5 @@ pub use server::{
     IntrospectRequest, IntrospectResponse, OidcDiscovery, RevokeRequest, TokenResponse,
     UserInfoResponse,
 };
+
+pub use provider::{OidcConfig, OidcProfile, OidcProvider};

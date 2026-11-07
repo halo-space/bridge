@@ -31,7 +31,7 @@ sender      发送短信和邮件等外部通知
 verifier    校验用户提交的验证码、TOTP、恢复码、Passkey 等材料
 ```
 
-`state`、`nonce`、`PKCE` 是 OAuth/OIDC 协议流程参数，统一归 `oidc`，不归 `validator/verifier`。
+`state`、`nonce`、`PKCE` 是 OAuth/OIDC 协议流程参数，统一归 `factor/oidc`，不归 `validator/verifier`。
 
 密码、RSA、TOTP、恢复码等底层算法归 `pkg`；`factor` 只负责组合用户登录方式并调用这些能力。
 
@@ -106,6 +106,7 @@ src/
   - `wecom.rs`：企业微信网页与内嵌登录，通过 `corpid` + `corpsecret` 换取成员唯一 `userid`。
   - `ldap.rs`：企业现有 LDAP / Active Directory 目录服务的连接、搜索和密码认证。
   - `saml/`：SAML 配置、断言模型和协议校验。
+- **`factor/oidc/provider/`**：外部 OIDC 身份源的配置、Claims 解析和 `Identity` 转换。
 - **`factor/passkey.rs`**：持久化 Passkey 模型。
 - **`validator/verifier/passkey.rs`**：`WebAuthn` 协议实现，负责标准注册、认证验签、RP/origin 校验和计数器结果。
 
@@ -142,6 +143,7 @@ src/
   - 支持从 RSA 公钥或组件一键导出 `/.well-known/jwks.json`（Base64URL 格式的模数 `n` 与指数 `e`），微服务无需共享私钥即可独立校验。
 
 ### 5. OIDC / OAuth 2.0 协议引擎 (`src/factor/oidc/`)
+- **`factor/oidc/provider/`**：外部 OIDC 登录 Provider。
 - **`factor/oidc/server.rs`**：RFC 8414 标准 Discovery 元数据模型（`/.well-known/openid-configuration`），端点自适应拼接。
 - 当前 Discovery 只声明已实现的 Authorization Code、PKCE、JWKS 和撤销能力；UserInfo、Introspection 和隐式授权仍是数据模型或后续能力。
 - **`factor/oidc/flow.rs`**：
@@ -330,4 +332,4 @@ Provider 负责第三方协议交互，并将资料转换为 `types::Identity`�
 6. 完善认证结果、认证强度和重新认证规则；
 7. 最后设计 `flow` 或 `pipeline` 编排层。
 
-OIDC 的 `state`、`nonce`、PKCE 归 `oidc` 协议模块。业务权限、应用 Session 和企业组织同步不属于当前 `idp` 核心范围。
+OIDC 的 `state`、`nonce`、PKCE 归 `factor/oidc` 协议模块。业务权限、应用 Session 和企业组织同步不属于当前 `idp` 核心范围。
