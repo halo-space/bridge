@@ -17,6 +17,8 @@ use halo::bridge::*;
 
 Pipeline 只负责节点图、状态、路由、汇聚、重试和暂停恢复。用户输入通过 `Event::Input` 提交，节点执行通过 `Runner` 提供。
 
+页面配置使用固定能力码。自定义能力使用 `custom.*` 命名空间，例如 `custom.card`；页面只能引用已经注册的能力码。
+
 ```rust
 use halo::bridge::{Context, Event, Node, Pipeline, Progress};
 
