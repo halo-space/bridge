@@ -153,4 +153,4 @@ cargo bench --bench pipeline
 
 当前测试覆盖基础认证材料、密码算法、Passkey 注册认证 fixture、存储契约和计数器 CAS、OIDC 失败路径、Token rotation、Provider 资料转换以及 SAML 签名、状态关联和重放。
 
-后续工作见 [plan.md](plan.md)，当前问题见 [issue.md](issue.md)。
+完整使用方式见 [USAGE.md](https://github.com/halo-space/bridge/blob/main/USAGE.md)。项目计划见 [plan.md](https://github.com/halo-space/bridge/blob/main/plan.md)，当前问题见 [issue.md](https://github.com/halo-space/bridge/blob/main/issue.md)。
