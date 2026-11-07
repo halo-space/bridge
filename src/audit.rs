@@ -51,6 +51,12 @@ pub enum AuditOutcome {
 pub struct AuditEvent {
     /// 事件唯一流水号
     pub id: String,
+    /// 请求链路追踪 ID
+    #[serde(default)]
+    pub trace_id: Option<String>,
+    /// 外部请求 ID
+    #[serde(default)]
+    pub request_id: Option<String>,
     /// 租户 ID
     pub tenant_id: i64,
     /// 事件类型
@@ -83,6 +89,8 @@ impl AuditEvent {
     ) -> Self {
         Self {
             id: Uuid::new_v4().to_string(),
+            trace_id: None,
+            request_id: None,
             tenant_id,
             event_type,
             user_id: None,
@@ -104,6 +112,16 @@ impl AuditEvent {
 
     pub fn with_user_agent(mut self, ua: impl Into<String>) -> Self {
         self.user_agent = Some(ua.into());
+        self
+    }
+
+    pub fn with_trace(mut self, trace_id: impl Into<String>) -> Self {
+        self.trace_id = Some(trace_id.into());
+        self
+    }
+
+    pub fn with_request(mut self, request_id: impl Into<String>) -> Self {
+        self.request_id = Some(request_id.into());
         self
     }
 
@@ -132,6 +150,8 @@ mod tests {
         )
         .with_user(1001, "admin")
         .with_user_agent("Mozilla/5.0")
+        .with_trace("trace-1")
+        .with_request("request-1")
         .with_metadata(serde_json::json!({ "auth_method": "webauthn" }));
 
         assert_eq!(event.tenant_id, 1);
@@ -139,6 +159,8 @@ mod tests {
         assert_eq!(event.outcome, AuditOutcome::Success);
         assert_eq!(event.username.as_deref(), Some("admin"));
         assert_eq!(event.client_ip, "127.0.0.1");
+        assert_eq!(event.trace_id.as_deref(), Some("trace-1"));
+        assert_eq!(event.request_id.as_deref(), Some("request-1"));
         assert!(event.timestamp > 0);
     }
 }
