@@ -114,4 +114,4 @@ cargo test
 
 当前测试覆盖基础认证材料、密码算法、Passkey 注册认证 fixture、存储契约和计数器 CAS、OIDC 失败路径、Token rotation、Provider 资料转换以及 SAML 签名、状态关联和重放。
 
-后续工作见 [plan.md](plan.md)，当前问题见 [issue.mdMD](issue.mdMD)。
+后续工作见 [plan.md](plan.md)，当前问题见 [issue.md](issue.md)。
