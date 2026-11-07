@@ -39,10 +39,10 @@
 
 - [x] 增加真实 IdP metadata 和签名响应 fixture
 - [x] 增加断言重放测试
-- [ ] 增加 SP 发起流程状态关联
+- [x] 增加 SP 发起流程状态关联
 - [x] 明确 replay cache 的契约和失败策略
 
-验收条件是签名、Issuer、Audience、时间窗口、状态关联和重放控制都有失败测试。当前 `SamlAuth::check_with` 接收调用方实现的 `ReplayCache`，使用严格 `ReplayMode::All`；SP 发起状态关联待补。
+验收条件是签名、Issuer、Audience、时间窗口、状态关联和重放控制都有失败测试。`SamlAuth::start` 返回 tracker，`check_state` 强制关联 tracker 与 replay cache。
 
 ## 阶段三：Pipeline 编排
 

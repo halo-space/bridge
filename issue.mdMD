@@ -6,10 +6,6 @@
 
 WebAuthn 注册、认证、持久化读取、计数器 CAS、`last_used_at` 和错误 challenge 已有真实协议 fixture 测试。bridge 不管理 Session，认证状态的单次保存与消费必须由调用方通过单次凭证存储完成；后续需要在集成层验证原子消费。
 
-### SAML 重放和状态关联不足
-
-`SamlAuth` 已完成 metadata、签名、Issuer、Audience、时间窗口校验，并通过真实 IdP 响应 fixture 和 `check_with` replay cache 拒绝重复断言。当前已有 `start/check_state` 状态关联接口，但正向 SP 响应 fixture 还需要补齐；默认 `check` 不持有缓存，生产调用方必须使用 `check_with` 或 `check_state` 接入原子实现。
-
 ### 多租户上下文不完整
 
 `Users::find_by_id` 和 `Clients::find_client` 没有租户参数。授权码和 Passkey 已有租户字段，其他查询边界需要继续统一。

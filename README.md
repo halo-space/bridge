@@ -50,7 +50,7 @@ Bridge 不保存业务用户，也不执行账号绑定。Provider 只把第三�
 | 恢复码和 Magic Link | 已实现 | `validator` 和 `factor/basic/magic` |
 | GitHub、飞书、Google、微信 | 已实现 | 授权地址、授权码交换、资料转换 |
 | LDAP | 已实现 | 服务账号绑定、用户搜索、密码绑定、Identity 输出 |
-| SAML | 部分实现 | metadata、签名、Issuer、Audience、时间校验、真实 fixture、replay cache 和 `start/check_state` 已覆盖；正向 SP 状态 fixture 待补 |
+| SAML | 已实现 | metadata、签名、Issuer、Audience、时间校验、真实 fixture、replay cache 和 SP 状态关联 |
 | 企业微信、钉钉 | 已实现 | 授权码交换和 Identity 输出 |
 | OIDC Authorization Code | 已实现 | state、nonce、PKCE、scope、redirect URI、Refresh Token、撤销 |
 | UserInfo、Introspection、隐式授权 | 待实现 | 当前只保留模型，不在 Discovery 中声明 |
@@ -111,6 +111,6 @@ cargo check
 cargo test
 ```
 
-当前测试覆盖基础认证材料、密码算法、Passkey 注册认证 fixture、存储契约和计数器 CAS、OIDC 失败路径、Token rotation、Provider 资料转换和 SAML 配置边界。
+当前测试覆盖基础认证材料、密码算法、Passkey 注册认证 fixture、存储契约和计数器 CAS、OIDC 失败路径、Token rotation、Provider 资料转换以及 SAML 签名、状态关联和重放。
 
 后续工作见 [plan.md](plan.md)，当前问题见 [issue.mdMD](issue.mdMD)。
