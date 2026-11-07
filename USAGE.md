@@ -2,8 +2,6 @@
 
 ## 安装
 
-`crates.io` 上的包名是 `halo-bridge`，库名是 `halo`。由于 `halo` 这个包名已经被其他项目占用，依赖声明需要使用包重命名：
-
 ```toml
 [dependencies]
 halo = { package = "halo-bridge", version = "0.3" }

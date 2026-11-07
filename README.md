@@ -4,8 +4,6 @@ Bridge 是一个面向企业身份认证的 Rust 能力库。它提供基础登�
 
 完整使用方式见 [USAGE.md](https://github.com/halo-space/bridge/blob/main/USAGE.md)。
 
-发布包名为 `halo-bridge`。由于 crates.io 已有同名 `halo` 包，调用方可以在依赖声明中将它重命名为 `halo`，继续使用统一入口 `halo::bridge`：
-
 ```toml
 [dependencies]
 halo = { package = "halo-bridge", version = "0.3" }
