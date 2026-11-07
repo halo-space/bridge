@@ -57,10 +57,12 @@
 
 ## 阶段四：协议扩展
 
-- [ ] 决定 UserInfo 是否进入核心实现
-- [ ] 决定 Introspection 是否进入核心实现
-- [ ] 继续保持 Discovery 与实际能力一致
-- [ ] 明确是否实现隐式授权
+- [x] 决定 UserInfo 是否进入核心实现
+- [x] 决定 Introspection 是否进入核心实现
+- [x] 继续保持 Discovery 与实际能力一致
+- [x] 明确是否实现隐式授权
+
+结论：bridge 只提供 OIDC 流程校验、Token 校验和外部 Provider 资料转换，不维护业务用户，因此不提供 UserInfo 端点；Introspection 由调用方使用 `TokenService::verify_live` 后组装响应；Discovery 只声明 Authorization Code、PKCE、JWKS 和撤销；隐式授权不实现，统一使用 Authorization Code + PKCE。
 
 ## 阶段五：企业设备因子
 
@@ -71,7 +73,7 @@
 
 ## 阶段六：安全审计
 
-- [ ] 补齐 Users 和 Clients 的租户上下文
+- [x] 补齐 Users 和 Clients 的租户上下文
 - [ ] 明确 Token 撤销校验的统一入口
 - [ ] 补充 Refresh Token 对用户状态的检查边界
 - [ ] 设计 RSA 密钥持久化和轮换契约

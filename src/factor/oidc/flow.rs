@@ -39,6 +39,7 @@ impl OidcFlow {
     /// 校验授权请求参数及客户端合法性
     pub async fn validate_authorize_request<C: Clients>(
         client_store: &C,
+        tenant_id: i64,
         req: &AuthorizeRequest,
     ) -> Result<OAuthClient> {
         if req.response_type != "code" {
@@ -49,7 +50,7 @@ impl OidcFlow {
         }
 
         let client = client_store
-            .find_client(&req.client_id)
+            .find_client(tenant_id, &req.client_id)
             .await?
             .ok_or_else(|| IdpError::InvalidClient(req.client_id.clone()))?;
 
@@ -176,6 +177,7 @@ impl OidcFlow {
     /// 授权码换 Token 校验（单次使用消费 + PKCE 校验 + Client 密钥校验）
     pub async fn exchange_code<CS: Clients, K: Secrets>(
         client_store: &CS,
+        tenant_id: i64,
         kv: &K,
         req: &TokenRequest,
     ) -> Result<AuthCode> {
@@ -208,7 +210,7 @@ impl OidcFlow {
 
         // 4. 验证客户端凭证 (机密客户端需验证 secret，公共客户端需走 PKCE)
         let client = client_store
-            .find_client(&req.client_id)
+            .find_client(tenant_id, &req.client_id)
             .await?
             .ok_or_else(|| IdpError::InvalidClient(req.client_id.clone()))?;
 
@@ -231,6 +233,10 @@ impl OidcFlow {
             return Err(IdpError::InvalidPkce);
         }
 
+        if auth_code.tenant_id != tenant_id {
+            return Err(IdpError::InvalidClient("Tenant mismatch".to_string()));
+        }
+
         if !kv.take_if(&key, &val).await? {
             return Err(IdpError::InvalidCode);
         }
@@ -241,6 +247,7 @@ impl OidcFlow {
     /// 校验并处理 Refresh Token 换发 (grant_type=refresh_token)
     pub async fn exchange_refresh_token<C: Clients, K: Secrets>(
         client_store: &C,
+        tenant_id: i64,
         token_service: &TokenService,
         kv: &K,
         req: &TokenRequest,
@@ -258,7 +265,7 @@ impl OidcFlow {
 
         // 验证客户端合法性与凭证
         let client = client_store
-            .find_client(&req.client_id)
+            .find_client(tenant_id, &req.client_id)
             .await?
             .ok_or_else(|| IdpError::InvalidClient(req.client_id.clone()))?;
 
@@ -284,6 +291,9 @@ impl OidcFlow {
         }
 
         let claims = token_service.verify_refresh(refresh_token)?;
+        if claims.tenant_id != tenant_id {
+            return Err(IdpError::InvalidClient("Tenant mismatch".to_string()));
+        }
         if claims.aud.as_deref() != Some(req.client_id.as_str()) {
             return Err(IdpError::InvalidClient(
                 "Refresh token client mismatch".into(),

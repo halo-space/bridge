@@ -418,6 +418,7 @@ struct MemSecrets {
 }
 
 struct MemClients {
+    tenant_id: i64,
     client: OAuthClient,
 }
 
@@ -427,8 +428,15 @@ struct MemPasskeys {
 
 #[async_trait]
 impl Clients for MemClients {
-    async fn find_client(&self, client_id: &str) -> bridge::Result<Option<OAuthClient>> {
-        Ok((self.client.client_id == client_id).then(|| self.client.clone()))
+    async fn find_client(
+        &self,
+        tenant_id: i64,
+        client_id: &str,
+    ) -> bridge::Result<Option<OAuthClient>> {
+        Ok(
+            (self.tenant_id == tenant_id && self.client.client_id == client_id)
+                .then(|| self.client.clone()),
+        )
     }
 }
 
@@ -718,6 +726,7 @@ async fn test_oidc_code_keeps_nonce_and_survives_failed_pkce() {
     let kv = MemSecrets::new();
     let (verifier, challenge) = oidc::Pkce::new();
     let clients = MemClients {
+        tenant_id: 2,
         client: OAuthClient {
             client_id: "web".into(),
             client_secret: None,
@@ -742,27 +751,32 @@ async fn test_oidc_code_keeps_nonce_and_survives_failed_pkce() {
     let mut bad_scope = authorize.clone();
     bad_scope.scope = Some("admin".into());
     assert!(
-        oidc::OidcFlow::validate_authorize_request(&clients, &bad_scope)
+        oidc::OidcFlow::validate_authorize_request(&clients, 2, &bad_scope)
             .await
             .is_err()
     );
     let mut bad_redirect = authorize.clone();
     bad_redirect.redirect_uri = "https://evil.example/callback".into();
     assert!(
-        oidc::OidcFlow::validate_authorize_request(&clients, &bad_redirect)
+        oidc::OidcFlow::validate_authorize_request(&clients, 2, &bad_redirect)
             .await
             .is_err()
     );
     let mut bad_method = authorize.clone();
     bad_method.code_challenge_method = Some("S512".into());
     assert!(
-        oidc::OidcFlow::validate_authorize_request(&clients, &bad_method)
+        oidc::OidcFlow::validate_authorize_request(&clients, 2, &bad_method)
             .await
             .is_err()
     );
-    oidc::OidcFlow::validate_authorize_request(&clients, &authorize)
+    oidc::OidcFlow::validate_authorize_request(&clients, 2, &authorize)
         .await
         .unwrap();
+    assert!(
+        oidc::OidcFlow::validate_authorize_request(&clients, 3, &authorize)
+            .await
+            .is_err()
+    );
     let code = oidc::OidcFlow::issue_code_with_nonce(
         &kv,
         "web",
@@ -790,19 +804,19 @@ async fn test_oidc_code_keeps_nonce_and_survives_failed_pkce() {
     let mut bad_redirect_token = bad.clone();
     bad_redirect_token.redirect_uri = Some("https://evil.example/callback".into());
     assert!(
-        oidc::OidcFlow::exchange_code(&clients, &kv, &bad_redirect_token)
+        oidc::OidcFlow::exchange_code(&clients, 2, &kv, &bad_redirect_token)
             .await
             .is_err()
     );
     let mut bad_client = bad.clone();
     bad_client.client_id = "other".into();
     assert!(
-        oidc::OidcFlow::exchange_code(&clients, &kv, &bad_client)
+        oidc::OidcFlow::exchange_code(&clients, 2, &kv, &bad_client)
             .await
             .is_err()
     );
     assert!(
-        oidc::OidcFlow::exchange_code(&clients, &kv, &bad)
+        oidc::OidcFlow::exchange_code(&clients, 2, &kv, &bad)
             .await
             .is_err()
     );
@@ -811,12 +825,12 @@ async fn test_oidc_code_keeps_nonce_and_survives_failed_pkce() {
         code_verifier: Some(verifier),
         ..bad
     };
-    let exchanged = oidc::OidcFlow::exchange_code(&clients, &kv, &good)
+    let exchanged = oidc::OidcFlow::exchange_code(&clients, 2, &kv, &good)
         .await
         .unwrap();
     assert_eq!(exchanged.nonce.as_deref(), Some("nonce-1"));
     assert!(
-        oidc::OidcFlow::exchange_code(&clients, &kv, &good)
+        oidc::OidcFlow::exchange_code(&clients, 2, &kv, &good)
             .await
             .is_err()
     );
@@ -826,6 +840,7 @@ async fn test_oidc_code_keeps_nonce_and_survives_failed_pkce() {
 async fn test_oidc_refresh_rotates_and_revokes_old_token() {
     let kv = MemSecrets::new();
     let clients = MemClients {
+        tenant_id: 9,
         client: OAuthClient {
             client_id: "web".into(),
             client_secret: None,
@@ -860,7 +875,7 @@ async fn test_oidc_refresh_rotates_and_revokes_old_token() {
     };
 
     let (_, next_refresh) =
-        oidc::OidcFlow::exchange_refresh_token(&clients, &service, &kv, &request)
+        oidc::OidcFlow::exchange_refresh_token(&clients, 9, &service, &kv, &request)
             .await
             .unwrap();
     assert_ne!(refresh, next_refresh);
@@ -870,7 +885,7 @@ async fn test_oidc_refresh_rotates_and_revokes_old_token() {
             .unwrap()
     );
     assert!(
-        oidc::OidcFlow::exchange_refresh_token(&clients, &service, &kv, &request)
+        oidc::OidcFlow::exchange_refresh_token(&clients, 9, &service, &kv, &request)
             .await
             .is_err()
     );

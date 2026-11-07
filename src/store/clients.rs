@@ -4,5 +4,5 @@ use async_trait::async_trait;
 
 #[async_trait]
 pub trait Clients: Send + Sync {
-    async fn find_client(&self, client_id: &str) -> Result<Option<OAuthClient>>;
+    async fn find_client(&self, tenant_id: i64, client_id: &str) -> Result<Option<OAuthClient>>;
 }

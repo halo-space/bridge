@@ -6,10 +6,6 @@
 
 WebAuthn 注册、认证、持久化读取、计数器 CAS、`last_used_at` 和错误 challenge 已有真实协议 fixture 测试。bridge 不管理 Session，认证状态的单次保存与消费必须由调用方通过单次凭证存储完成；后续需要在集成层验证原子消费。
 
-### 多租户上下文不完整
-
-`Users::find_by_id` 和 `Clients::find_client` 没有租户参数。授权码和 Passkey 已有租户字段，其他查询边界需要继续统一。
-
 ### Token 撤销入口不统一
 
 `TokenService::verify_live` 会检查撤销状态，普通 `verify_token` 不检查。需要明确调用方的统一校验入口。
@@ -27,10 +23,6 @@ Refresh Token 已完成签名、过期、类型、客户端、rotation 和撤销
 ### Pipeline 失败终止边界待明确
 
 Pipeline 已支持步骤顺序、认证强度、有效期和追加因子。认证因子失败不会进入 Pipeline，当前仍需要明确调用方收到失败结果后的终止策略。
-
-### OIDC 扩展能力尚未实现
-
-UserInfo、Introspection 和隐式授权当前只有部分模型，Discovery 没有声明这些能力。
 
 ### 企业目录同步是遗留代码
 
