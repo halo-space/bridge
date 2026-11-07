@@ -28,7 +28,7 @@ pub use audit::{AuditEvent, AuditEventType, AuditOutcome};
 pub use error::{IdpError, Result};
 pub use factor::basic::magic::{MagicLinkConfig, MagicLinkPayload, MagicLinkService};
 pub use factor::oidc::{Nonce, Pkce, State};
-pub use pipeline::{Pipeline, Progress, Step};
+pub use pipeline::{Context, Event, Node, Pipeline, Progress, Run};
 pub use pkg::password::{Algorithm, Argon2id, Bcrypt, Codec, Password, Pbkdf2, Sm3};
 pub use pkg::recovery::RecoveryCode;
 pub use pkg::rsa::RsaCrypto;
