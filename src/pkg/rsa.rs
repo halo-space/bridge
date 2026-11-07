@@ -4,7 +4,7 @@ use base64::prelude::BASE64_STANDARD;
 use rand_core::OsRng;
 use rsa::{
     Oaep, RsaPrivateKey, RsaPublicKey,
-    pkcs8::{EncodePublicKey, LineEnding},
+    pkcs8::{DecodePrivateKey, EncodePrivateKey, EncodePublicKey, LineEnding},
 };
 use sha2::Sha256;
 use std::sync::OnceLock;
@@ -34,6 +34,34 @@ impl RsaCrypto {
             public_key,
             public_key_pem,
         })
+    }
+
+    /// 从 PKCS#8 PEM 恢复密钥，供调用方持久化和启动加载。
+    pub fn from_private_pem(pem: &str) -> Result<Self> {
+        let private_key = RsaPrivateKey::from_pkcs8_pem(pem)
+            .map_err(|e| IdpError::Internal(format!("Failed to load RSA private key: {e}")))?;
+        let public_key = RsaPublicKey::from(&private_key);
+        let public_key_pem = public_key
+            .to_public_key_pem(LineEnding::LF)
+            .map_err(|e| IdpError::Internal(format!("Failed to export RSA public key: {e}")))?;
+        Ok(Self {
+            private_key,
+            public_key,
+            public_key_pem,
+        })
+    }
+
+    /// 导出 PKCS#8 PEM，调用方应将其放入密钥管理系统。
+    pub fn private_key_pem(&self) -> Result<String> {
+        self.private_key
+            .to_pkcs8_pem(LineEnding::LF)
+            .map(|pem| pem.to_string())
+            .map_err(|e| IdpError::Internal(format!("Failed to export RSA private key: {e}")))
+    }
+
+    /// 生成新密钥，用于显式轮换。
+    pub fn rotate() -> Result<Self> {
+        Self::new()
     }
 
     /// 获取全局单例密钥对（进程生命周期内一致，避免重启前重复生成）
@@ -82,5 +110,30 @@ impl RsaCrypto {
             }
         }
         input.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn persists_and_restores_key_pair() {
+        let crypto = RsaCrypto::new().unwrap();
+        let pem = crypto.private_key_pem().unwrap();
+        let restored = RsaCrypto::from_private_pem(&pem).unwrap();
+        assert_eq!(crypto.get_public_key_pem(), restored.get_public_key_pem());
+
+        let mut rng = OsRng;
+        let cipher = crypto
+            .get_public_key()
+            .encrypt(&mut rng, Oaep::new::<Sha256>(), b"secret")
+            .unwrap();
+        let encoded = BASE64_STANDARD.encode(cipher);
+        assert_eq!(restored.decrypt_oaep(&encoded).unwrap(), "secret");
+        assert_ne!(
+            crypto.get_public_key_pem(),
+            RsaCrypto::rotate().unwrap().get_public_key_pem()
+        );
     }
 }

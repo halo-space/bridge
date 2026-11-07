@@ -76,13 +76,13 @@
 - [x] 补齐 Users 和 Clients 的租户上下文
 - [x] 明确 Token 撤销校验的统一入口
 - [x] 补充 Refresh Token 对用户状态的检查边界
-- [ ] 设计 RSA 密钥持久化和轮换契约
+- [x] 设计 RSA 密钥持久化和轮换契约
 - [ ] 区分邮件短信 Mock 与生产发送失败
 - [ ] 明确 Events 写入失败、幂等和追踪字段
 - [ ] 增加 Provider 网络错误和失败响应测试
 - [x] 删除未导出的企业目录同步遗留代码
 
-结论：`verify_token` 只做签名和 Claims 校验；需要实时状态的请求统一使用 `verify_live`。Refresh Token 换发通过 `Users` 检查租户、用户存在和 `is_active`，bridge 不维护用户数据。
+结论：`verify_token` 只做签名和 Claims 校验；需要实时状态的请求统一使用 `verify_live`。Refresh Token 换发通过 `Users` 检查租户、用户存在和 `is_active`，bridge 不维护用户数据。RSA 使用 `from_private_pem` 加载持久化密钥，`private_key_pem` 导出，`rotate` 显式轮换；全局生成只作为默认兼容入口。
 
 ## 验收命令
 
