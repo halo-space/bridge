@@ -1,18 +1,18 @@
-use super::{LockoutPolicy, PasswordPolicy, Reauth};
+use super::{Reauth, lockout, password};
 
 /// 认证规则集合。
 #[derive(Debug, Clone)]
 pub struct Rules {
-    pub password: PasswordPolicy,
-    pub lockout: LockoutPolicy,
+    pub password: password::Policy,
+    pub lockout: lockout::Policy,
     pub reauth_secs: i64,
 }
 
 impl Default for Rules {
     fn default() -> Self {
         Self {
-            password: PasswordPolicy::default(),
-            lockout: LockoutPolicy::default(),
+            password: password::Policy::default(),
+            lockout: lockout::Policy::default(),
             reauth_secs: 900,
         }
     }

@@ -4,7 +4,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use bridge::factor::basic::magic::{MagicLinkConfig, MagicLinkService};
 use bridge::factor::oidc;
 use bridge::factor::passkey::Passkey;
-use bridge::pkg::password::{Password, PasswordAlgorithm};
+use bridge::pkg::password::{Algorithm, Password};
 use bridge::store::{Clients, Passkeys, Secrets, Users};
 use bridge::types::{AuthUser, OAuthClient};
 use bridge::validator::issuer::CaptchaIssuer;
@@ -21,16 +21,14 @@ use std::sync::{Arc, Mutex};
 #[test]
 fn test_password_hash_and_verify() {
     let raw = "admin123";
-    let hash = bridge::pkg::password::Password::hash(
-        raw,
-        bridge::pkg::password::PasswordAlgorithm::Argon2id,
-    )
-    .expect("hash failed");
+    let hash =
+        bridge::pkg::password::Password::hash(raw, bridge::pkg::password::Algorithm::Argon2id)
+            .expect("hash failed");
     assert!(
         bridge::pkg::password::Password::verify(
             raw,
             &hash,
-            bridge::pkg::password::PasswordAlgorithm::Argon2id,
+            bridge::pkg::password::Algorithm::Argon2id,
         )
         .expect("verify failed")
     );
@@ -38,7 +36,7 @@ fn test_password_hash_and_verify() {
         !bridge::pkg::password::Password::verify(
             "WrongSecret",
             &hash,
-            bridge::pkg::password::PasswordAlgorithm::Argon2id,
+            bridge::pkg::password::Algorithm::Argon2id,
         )
         .expect("verify failed")
     );
@@ -106,10 +104,10 @@ fn test_saml_fixture_and_replay_cache() {
 #[test]
 fn test_password_algorithms_and_unknown_code() {
     for algorithm in [
-        PasswordAlgorithm::Argon2id,
-        PasswordAlgorithm::Bcrypt,
-        PasswordAlgorithm::Pbkdf2,
-        PasswordAlgorithm::Sm3,
+        Algorithm::Argon2id,
+        Algorithm::Bcrypt,
+        Algorithm::Pbkdf2,
+        Algorithm::Sm3,
     ] {
         let hash = Password::hash("correct horse battery staple", algorithm).expect("hash failed");
         assert!(
@@ -958,7 +956,7 @@ async fn test_oidc_refresh_rotates_and_revokes_old_token() {
 
 #[test]
 fn test_password_policy_and_strength() {
-    let policy = bridge::rules::PasswordPolicy::default();
+    let policy = bridge::rules::password::Policy::default();
 
     // 强密码验证通过
     assert!(
@@ -979,33 +977,33 @@ fn test_password_policy_and_strength() {
     // 强度评估
     assert_eq!(
         policy.assess_strength("123"),
-        bridge::rules::PasswordStrength::Weak
+        bridge::rules::password::Strength::Weak
     );
     assert_eq!(
         policy.assess_strength("Secure@2026!Halo"),
-        bridge::rules::PasswordStrength::Strong
+        bridge::rules::password::Strength::Strong
     );
 }
 
 #[test]
 fn test_lockout_policy() {
-    let policy = bridge::rules::LockoutPolicy::default();
+    let policy = bridge::rules::lockout::Policy::default();
 
     // 0 次失败允许登录
     assert_eq!(
         policy.evaluate(0, None),
-        bridge::rules::LockoutDecision::Allow
+        bridge::rules::lockout::Decision::Allow
     );
 
     // 3 次失败触发验证码
     assert_eq!(
         policy.evaluate(3, None),
-        bridge::rules::LockoutDecision::RequireCaptcha
+        bridge::rules::lockout::Decision::RequireCaptcha
     );
 
     // 5 次失败锁定账号
     match policy.evaluate(5, None) {
-        bridge::rules::LockoutDecision::Locked { remaining_seconds } => {
+        bridge::rules::lockout::Decision::Locked { remaining_seconds } => {
             assert_eq!(remaining_seconds, 900);
         }
         _ => panic!("Expected locked decision"),

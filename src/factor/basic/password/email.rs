@@ -5,9 +5,9 @@ use crate::types::AuthUser;
 use crate::types::{AuthResult, Level, Method};
 
 /// 邮箱 + 密码登录。
-pub struct EmailPassword;
+pub struct Email;
 
-impl EmailPassword {
+impl Email {
     pub async fn result<S: Users>(
         store: &S,
         tenant_id: i64,

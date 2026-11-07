@@ -5,9 +5,9 @@ use crate::types::AuthUser;
 use crate::types::{AuthResult, Level, Method};
 
 /// 手机号 + 密码登录。
-pub struct PhonePassword;
+pub struct Phone;
 
-impl PhonePassword {
+impl Phone {
     pub async fn result<S: Users>(
         store: &S,
         tenant_id: i64,

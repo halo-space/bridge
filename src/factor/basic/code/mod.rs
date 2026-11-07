@@ -2,6 +2,6 @@ pub mod email;
 pub mod sms;
 pub mod totp;
 
-pub use email::EmailCode;
-pub use sms::SmsCode;
-pub use totp::TotpCode;
+pub use email::Email;
+pub use sms::Sms;
+pub use totp::Totp;

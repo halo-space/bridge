@@ -6,9 +6,9 @@ use crate::validator::issuer::CodeIssuer;
 use crate::validator::verifier::passcode::Passcode;
 
 /// 手机号 + 短信验证码登录。
-pub struct SmsCode;
+pub struct Sms;
 
-impl SmsCode {
+impl Sms {
     pub async fn result<U: Users, K: Secrets>(
         user_store: &U,
         kv: &K,

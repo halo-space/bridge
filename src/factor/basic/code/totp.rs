@@ -2,12 +2,12 @@ use crate::error::{IdpError, Result};
 use crate::store::{Factors, Users};
 use crate::types::AuthUser;
 use crate::types::{AuthResult, Level, Method};
-use crate::validator::verifier::totp::Totp;
+use crate::validator::verifier::totp::Totp as Verify;
 
 /// 账号 + TOTP 登录。
-pub struct TotpCode;
+pub struct Totp;
 
-impl TotpCode {
+impl Totp {
     pub async fn result<U: Users, T: Factors>(
         user_store: &U,
         totp_store: &T,
@@ -45,7 +45,7 @@ impl TotpCode {
             .find_totp(tenant_id, user.id)
             .await?
             .ok_or(IdpError::InvalidCredentials)?;
-        if !binding.enabled || !Totp::check(&binding.secret, code, timestamp)? {
+        if !binding.enabled || !Verify::check(&binding.secret, code, timestamp)? {
             return Err(IdpError::InvalidCredentials);
         }
 

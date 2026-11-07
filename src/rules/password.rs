@@ -2,7 +2,7 @@ use crate::error::{IdpError, Result};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum PasswordStrength {
+pub enum Strength {
     Weak,
     Medium,
     Strong,
@@ -10,7 +10,7 @@ pub enum PasswordStrength {
 
 /// 密码安全策略配置 (对齐 Authing 3.1.1 密码策略)
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PasswordPolicy {
+pub struct Policy {
     pub min_length: usize,
     pub max_length: usize,
     pub require_uppercase: bool,
@@ -22,7 +22,7 @@ pub struct PasswordPolicy {
     pub weak_passwords: Vec<String>,
 }
 
-impl Default for PasswordPolicy {
+impl Default for Policy {
     fn default() -> Self {
         Self {
             min_length: 8,
@@ -47,7 +47,7 @@ impl Default for PasswordPolicy {
     }
 }
 
-impl PasswordPolicy {
+impl Policy {
     /// 校验密码是否符合策略规范
     pub fn validate(&self, password: &str, username: Option<&str>) -> Result<()> {
         let len = password.chars().count();
@@ -128,10 +128,10 @@ impl PasswordPolicy {
     }
 
     /// 评估密码强度（弱 / 中 / 强）
-    pub fn assess_strength(&self, password: &str) -> PasswordStrength {
+    pub fn assess_strength(&self, password: &str) -> Strength {
         let len = password.chars().count();
         if len < 6 {
-            return PasswordStrength::Weak;
+            return Strength::Weak;
         }
 
         let mut score = 0;
@@ -155,11 +155,11 @@ impl PasswordPolicy {
         }
 
         if score <= 2 {
-            PasswordStrength::Weak
+            Strength::Weak
         } else if score <= 4 {
-            PasswordStrength::Medium
+            Strength::Medium
         } else {
-            PasswordStrength::Strong
+            Strength::Strong
         }
     }
 }

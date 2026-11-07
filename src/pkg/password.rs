@@ -15,7 +15,7 @@ use crate::types::AuthUser;
 
 /// 密码存储算法。算法标识由应用层随凭证保存，便于逐步升级历史密码。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PasswordAlgorithm {
+pub enum Algorithm {
     Argon2id,
     Bcrypt,
     Sm3,
@@ -23,7 +23,7 @@ pub enum PasswordAlgorithm {
     Custom(u16),
 }
 
-impl PasswordAlgorithm {
+impl Algorithm {
     pub fn from_code(code: u16) -> Option<Self> {
         Some(match code {
             1 => Self::Argon2id,
@@ -46,8 +46,8 @@ impl PasswordAlgorithm {
 }
 
 /// 密码算法的可插拔实现。
-pub trait PasswordCodec: Send + Sync {
-    fn algorithm(&self) -> PasswordAlgorithm;
+pub trait Codec: Send + Sync {
+    fn algorithm(&self) -> Algorithm;
     fn hash(&self, password: &str) -> Result<String>;
     fn verify(&self, password: &str, encoded: &str) -> Result<bool>;
 }
@@ -56,9 +56,9 @@ pub trait PasswordCodec: Send + Sync {
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Argon2id;
 
-impl PasswordCodec for Argon2id {
-    fn algorithm(&self) -> PasswordAlgorithm {
-        PasswordAlgorithm::Argon2id
+impl Codec for Argon2id {
+    fn algorithm(&self) -> Algorithm {
+        Algorithm::Argon2id
     }
 
     fn hash(&self, password: &str) -> Result<String> {
@@ -81,9 +81,9 @@ impl PasswordCodec for Argon2id {
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Bcrypt;
 
-impl PasswordCodec for Bcrypt {
-    fn algorithm(&self) -> PasswordAlgorithm {
-        PasswordAlgorithm::Bcrypt
+impl Codec for Bcrypt {
+    fn algorithm(&self) -> Algorithm {
+        Algorithm::Bcrypt
     }
 
     fn hash(&self, password: &str) -> Result<String> {
@@ -100,9 +100,9 @@ impl PasswordCodec for Bcrypt {
 #[derive(Debug, Clone, Copy)]
 pub struct Pbkdf2;
 
-impl PasswordCodec for Pbkdf2 {
-    fn algorithm(&self) -> PasswordAlgorithm {
-        PasswordAlgorithm::Pbkdf2
+impl Codec for Pbkdf2 {
+    fn algorithm(&self) -> Algorithm {
+        Algorithm::Pbkdf2
     }
 
     fn hash(&self, password: &str) -> Result<String> {
@@ -143,9 +143,9 @@ impl PasswordCodec for Pbkdf2 {
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Sm3;
 
-impl PasswordCodec for Sm3 {
-    fn algorithm(&self) -> PasswordAlgorithm {
-        PasswordAlgorithm::Sm3
+impl Codec for Sm3 {
+    fn algorithm(&self) -> Algorithm {
+        Algorithm::Sm3
     }
 
     fn hash(&self, password: &str) -> Result<String> {
@@ -178,24 +178,24 @@ impl PasswordCodec for Sm3 {
 pub struct Password;
 
 impl Password {
-    pub fn needs_upgrade(stored: Option<u16>, current: PasswordAlgorithm) -> bool {
+    pub fn needs_upgrade(stored: Option<u16>, current: Algorithm) -> bool {
         stored != Some(current.code())
     }
 
-    pub fn hash_with<C: PasswordCodec>(password: &str, codec: &C) -> Result<String> {
+    pub fn hash_with<C: Codec>(password: &str, codec: &C) -> Result<String> {
         codec.hash(password)
     }
 
-    pub fn verify_with<C: PasswordCodec>(password: &str, encoded: &str, codec: &C) -> Result<bool> {
+    pub fn verify_with<C: Codec>(password: &str, encoded: &str, codec: &C) -> Result<bool> {
         codec.verify(password, encoded)
     }
 
-    pub fn hash(password: &str, algorithm: PasswordAlgorithm) -> Result<String> {
+    pub fn hash(password: &str, algorithm: Algorithm) -> Result<String> {
         match algorithm {
-            PasswordAlgorithm::Argon2id => Argon2id.hash(password),
-            PasswordAlgorithm::Bcrypt => Bcrypt.hash(password),
-            PasswordAlgorithm::Pbkdf2 => Pbkdf2.hash(password),
-            PasswordAlgorithm::Sm3 => Sm3.hash(password),
+            Algorithm::Argon2id => Argon2id.hash(password),
+            Algorithm::Bcrypt => Bcrypt.hash(password),
+            Algorithm::Pbkdf2 => Pbkdf2.hash(password),
+            Algorithm::Sm3 => Sm3.hash(password),
             other => Err(IdpError::Internal(format!(
                 "Password algorithm {} is not registered",
                 other.code()
@@ -203,12 +203,12 @@ impl Password {
         }
     }
 
-    pub fn verify(password: &str, encoded: &str, algorithm: PasswordAlgorithm) -> Result<bool> {
+    pub fn verify(password: &str, encoded: &str, algorithm: Algorithm) -> Result<bool> {
         match algorithm {
-            PasswordAlgorithm::Argon2id => Argon2id.verify(password, encoded),
-            PasswordAlgorithm::Bcrypt => Bcrypt.verify(password, encoded),
-            PasswordAlgorithm::Pbkdf2 => Pbkdf2.verify(password, encoded),
-            PasswordAlgorithm::Sm3 => Sm3.verify(password, encoded),
+            Algorithm::Argon2id => Argon2id.verify(password, encoded),
+            Algorithm::Bcrypt => Bcrypt.verify(password, encoded),
+            Algorithm::Pbkdf2 => Pbkdf2.verify(password, encoded),
+            Algorithm::Sm3 => Sm3.verify(password, encoded),
             other => Err(IdpError::Internal(format!(
                 "Password algorithm {} is not registered",
                 other.code()
@@ -222,8 +222,8 @@ impl Password {
             .as_deref()
             .ok_or(IdpError::InvalidCredentials)?;
         let algorithm = match user.password_algorithm {
-            None => PasswordAlgorithm::Argon2id,
-            Some(code) => PasswordAlgorithm::from_code(code).ok_or_else(|| {
+            None => Algorithm::Argon2id,
+            Some(code) => Algorithm::from_code(code).ok_or_else(|| {
                 IdpError::AuthFailed(format!("Unsupported password algorithm: {code}"))
             })?,
         };

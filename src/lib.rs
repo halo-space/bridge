@@ -30,14 +30,12 @@ pub use error::{IdpError, Result};
 pub use factor::basic::magic::{MagicLinkConfig, MagicLinkPayload, MagicLinkService};
 pub use factor::oidc::{Nonce, Pkce, State};
 pub use pipeline::{Pipeline, Progress, Step};
-pub use pkg::password::{
-    Argon2id, Bcrypt, Password, PasswordAlgorithm, PasswordCodec, Pbkdf2, Sm3,
-};
+pub use pkg::password::{Algorithm, Argon2id, Bcrypt, Codec, Password, Pbkdf2, Sm3};
 pub use pkg::recovery::RecoveryCode;
 pub use pkg::rsa::RsaCrypto;
 pub use pkg::totp::Totp;
 pub use risk::{RiskAssessment, RiskConfig, RiskDecision, RiskEngine, UserHistory};
-pub use rules::{LockoutDecision, LockoutPolicy, PasswordPolicy, PasswordStrength, Reauth, Rules};
+pub use rules::{Reauth, Rules};
 pub use store::{Clients, Events, Factors, Limits, Passkeys, Secrets, Users};
 pub use types::{
     AuthCode, AuthResult, AuthUser, Identity, Level, Method, OAuthClient, TotpBinding,

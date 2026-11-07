@@ -6,9 +6,9 @@ use crate::validator::issuer::CodeIssuer;
 use crate::validator::verifier::passcode::Passcode;
 
 /// 邮箱 + 一次性验证码登录。
-pub struct EmailCode;
+pub struct Email;
 
-impl EmailCode {
+impl Email {
     pub async fn result<U: Users, K: Secrets>(
         user_store: &U,
         kv: &K,
