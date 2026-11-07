@@ -29,6 +29,7 @@ let cards = Cards::new()
     .add(Op::Verify, "password")
     .add(Op::Verify, "custom.card");
 let pipeline: Pipeline = config.compile_with(&cards)?;
+let page_schema = cards.schema();
 ```
 
 页面配置使用 `type`、`code` 和 `args`：
@@ -56,7 +57,17 @@ let pipeline: Pipeline = config.compile_with(&cards)?;
 
 `code` 只代表约定的能力，具体实现仍由调用方的 `Runner` 提供。`args` 会保存在节点上，用户实现可以通过 `node.args` 读取。
 
+需要使用密钥时只保存引用，不把真实值写入页面配置：
+
+```rust
+let value = halo::bridge::SecretRef::new("sms.tencent.secret").value();
+```
+
+应用层 Runner 负责根据这个引用从自己的密钥系统读取真实值。
+
 `Run` 会保存配置版本和 hash。恢复运行时必须使用同一份 Pipeline，配置重新发布后不会接管旧流程。
+
+Effect 节点可以配置 `once: true`，同一个持久化 Run 中只执行一次，适合审计、通知和发送类副作用。
 
 ```rust
 use halo::bridge::{Context, Event, Node, Pipeline, Progress};

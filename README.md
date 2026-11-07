@@ -109,6 +109,8 @@ Pipeline 的 `Services` 是 bridge 提供的可选默认适配器，不是能力
 
 页面配置通过 `PipelineConfig` 编译，并使用 `Cards` 校验固定能力码；自定义能力例如 `custom.card` 必须先注册。节点的 `args` 会传给用户自己的 `Runner`。
 
+`Cards::schema()` 可生成页面编辑器使用的能力 Schema；敏感配置使用 `SecretRef` 保存引用，真实密钥由应用层解析。
+
 配置编译后会生成版本和 hash，运行中的 `Run` 会绑定这两个值；页面发布新配置不会改变已经开始的认证流程。`Context` 还支持 `protocol`、`connection`、`request` 和 `meta`，用于传递请求和身份源上下文。
 
 所有可替换节点都通过 trait 扩展。内置短信使用 `SmsSender` 门面和 `Sender` 适配器；腾讯云使用 API 3.0 `SendSms` 与 TC3-HMAC-SHA256，其他供应商可以实现 `Sender` 后通过 `SmsSender::with` 接入。Pipeline 的自定义节点使用 `Runner`，可通过 `Fallback` 在保留内置能力的同时增加自己的社交、企业或业务认证逻辑。

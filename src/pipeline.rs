@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 pub mod services;
 pub use services::Services;
 pub mod config;
-pub use config::{Cards, EdgeConfig, NodeConfig, Op, PipelineConfig};
+pub use config::{Cards, EdgeConfig, NodeConfig, Op, PipelineConfig, SecretRef};
 
 const DEFAULT_MAX_STEPS: u32 = 128;
 
@@ -40,6 +40,8 @@ pub struct Node {
     pub fields: Vec<String>,
     #[serde(default)]
     pub args: Value,
+    #[serde(default)]
+    pub once: bool,
     pub edges: Vec<Edge>,
     pub join: Join,
     /// Maximum number of times this node may execute. Required for cycles.
@@ -53,6 +55,7 @@ impl Node {
             kind: Kind::Input,
             fields,
             args: Value::Null,
+            once: false,
             edges: Vec::new(),
             join: Join::All,
             limit: None,
@@ -88,6 +91,11 @@ impl Node {
         self
     }
 
+    pub fn once(mut self, once: bool) -> Self {
+        self.once = once;
+        self
+    }
+
     pub fn join(mut self, join: Join) -> Self {
         self.join = join;
         self
@@ -104,6 +112,7 @@ impl Node {
             kind,
             fields: Vec::new(),
             args: Value::Null,
+            once: false,
             edges: Vec::new(),
             join: Join::All,
             limit: None,
@@ -234,6 +243,16 @@ pub struct Run {
     pub pipeline_version: u16,
     #[serde(default)]
     pub pipeline_hash: Option<String>,
+    #[serde(default)]
+    pub effects: BTreeMap<String, Effect>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Effect {
+    pub routes: Vec<String>,
+    pub data: Value,
+    pub identity: Option<Identity>,
+    pub at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -353,6 +372,7 @@ impl Pipeline {
             payloads: BTreeMap::new(),
             pipeline_version: self.config_version,
             pipeline_hash: self.config_hash.clone(),
+            effects: BTreeMap::new(),
         };
         self.schedule(&mut run, &self.start)?;
         let progress = self.advance(&mut run)?;
@@ -440,6 +460,7 @@ impl Pipeline {
             } => {
                 self.check_node(&current, &event_node)?;
                 let targets = self.targets(node, &routes)?;
+                let effect_identity = identity.clone();
                 if let Some(identity) = identity {
                     if let Some(existing) = &run.context.identity {
                         if existing.provider != identity.provider
@@ -460,6 +481,17 @@ impl Pipeline {
                     at,
                     data: data.clone(),
                 });
+                if node.once && matches!(node.kind, Kind::Effect(_)) {
+                    run.effects.insert(
+                        current.clone(),
+                        Effect {
+                            routes: routes.clone(),
+                            data: data.clone(),
+                            identity: effect_identity,
+                            at,
+                        },
+                    );
+                }
                 run.submitted.remove(&current);
                 run.completed.insert(current.clone());
                 run.current = None;
@@ -526,6 +558,20 @@ impl Pipeline {
             .ok_or_else(|| IdpError::Internal(format!("Pipeline node not found: {node_id}")))?;
         if !runner.supports(node) {
             return Err(IdpError::Unsupported(format!("{}", node.id)));
+        }
+        if node.once {
+            if let Some(effect) = run.effects.get(&node_id).cloned() {
+                return self.resume(
+                    run,
+                    Event::Pass {
+                        node: node_id,
+                        routes: effect.routes,
+                        data: effect.data,
+                        identity: effect.identity,
+                        at: effect.at,
+                    },
+                );
+            }
         }
         let output = runner.run(node, &run.context).await?;
         let event = match output {

@@ -20,7 +20,7 @@ Pipeline 内置 `Services` 已支持 `Effect("audit")` 自动调用 `Events::rec
 
 短信已统一为 `SmsSender` + `Sender` 适配器，所有 Pipeline 节点都可以由调用方通过 `Runner` 实现或覆盖，`Services` 只是可选默认适配器。节点输入沿 DAG payload 传递，不再依赖全局字段扫描；Device nonce 在 Pipeline 校验时单次消费。
 
-配置编译、能力码校验、节点参数传递、Run 版本绑定和 Verify 输入状态已补齐。剩余工作是参数 Schema 导出、节点超时、幂等键和副作用重试策略。
+配置编译、能力码校验、节点参数传递、Run 版本绑定、Verify 输入状态、基础 Schema、SecretRef 和 Effect 单次执行已补齐。剩余工作是节点超时、外部幂等键和副作用重试策略。
 
 ## 文档和测试
 

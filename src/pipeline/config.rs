@@ -1,7 +1,7 @@
 use super::{Edge, Join, Node, Pipeline};
 use crate::error::{IdpError, Result};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -41,6 +41,8 @@ pub struct NodeConfig {
     pub join: Join,
     #[serde(default)]
     pub limit: Option<u32>,
+    #[serde(default)]
+    pub once: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -109,6 +111,7 @@ impl NodeConfig {
         node.args = self.args;
         node.join = self.join;
         node.limit = self.limit;
+        node.once = self.once;
         node.edges = self
             .edges
             .into_iter()
@@ -125,6 +128,21 @@ impl NodeConfig {
 #[derive(Debug, Clone, Default)]
 pub struct Cards {
     values: BTreeMap<Op, BTreeMap<String, BTreeSet<String>>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SecretRef {
+    pub key: String,
+}
+
+impl SecretRef {
+    pub fn new(key: impl Into<String>) -> Self {
+        Self { key: key.into() }
+    }
+
+    pub fn value(&self) -> Value {
+        json!({ "$secret": self.key })
+    }
 }
 
 #[cfg(test)]
@@ -173,6 +191,7 @@ mod tests {
                 edges: Vec::new(),
                 join: Join::All,
                 limit: None,
+                once: false,
             }],
         };
         assert!(config.compile_with(&Cards::new()).is_err());
@@ -205,6 +224,18 @@ impl Cards {
         self.values
             .get(&op)
             .is_some_and(|cards| cards.contains_key(code))
+    }
+
+    pub fn schema(&self) -> Value {
+        let mut operations = serde_json::Map::new();
+        for (op, cards) in &self.values {
+            let values = cards
+                .iter()
+                .map(|(code, args)| json!({ "code": code, "args": args }))
+                .collect::<Vec<_>>();
+            operations.insert(format!("{op:?}").to_lowercase(), Value::Array(values));
+        }
+        json!({ "version": 1, "operations": operations })
     }
 
     pub fn validate(&self, config: &PipelineConfig) -> Result<()> {
