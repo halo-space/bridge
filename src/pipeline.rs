@@ -294,6 +294,7 @@ impl Pipeline {
                 at,
             } => {
                 self.check_node(&current, &event_node)?;
+                let targets = self.targets(node, &routes)?;
                 if let Some(identity) = identity {
                     if let Some(existing) = &run.context.identity {
                         if existing.provider != identity.provider
@@ -316,7 +317,7 @@ impl Pipeline {
                 });
                 run.completed.insert(current.clone());
                 run.current = None;
-                for target in self.targets(node, &routes)? {
+                for target in targets {
                     self.arrive(run, &current, &target, false)?;
                 }
                 self.advance(run)
@@ -452,6 +453,10 @@ impl Pipeline {
             return Ok(());
         }
         let node = &self.nodes[node_id];
+        if node.join == Join::Any && self.all_failed(run, node_id) {
+            run.denied = Some((node_id.to_string(), "All branches failed".into()));
+            return Ok(());
+        }
         let visits = run.visits.entry(node_id.to_string()).or_default();
         *visits = visits.saturating_add(1);
         if let Some(limit) = node.limit {
@@ -505,6 +510,16 @@ impl Pipeline {
                 !arrived.is_empty() || (!expected.is_empty() && expected.is_subset(&failed))
             }
         }
+    }
+
+    fn all_failed(&self, run: &Run, node_id: &str) -> bool {
+        let expected = self
+            .incoming(node_id)
+            .into_iter()
+            .filter(|source| run.activated.contains(source))
+            .collect::<BTreeSet<_>>();
+        let failed = run.failed.get(node_id).cloned().unwrap_or_default();
+        !expected.is_empty() && expected.is_subset(&failed)
     }
 
     fn has_waiting_join(&self, run: &Run) -> bool {
@@ -712,6 +727,128 @@ mod tests {
         assert!(matches!(
             any.resume(&mut run, pass("a", &[])).unwrap(),
             Progress::Need { ref node, .. } if node == "join"
+        ));
+    }
+
+    #[test]
+    fn handles_all_and_any_branch_failures() {
+        let all = Pipeline::new(
+            "start",
+            vec![
+                Node::verify("start", "start")
+                    .edge(Some("a"), "a")
+                    .edge(Some("b"), "b"),
+                Node::verify("a", "a").edge(None::<String>, "join"),
+                Node::verify("b", "b").edge(None::<String>, "join"),
+                Node::effect("join", "audit").join(Join::All),
+            ],
+        );
+        let (mut run, _) = all.start(Context::default()).unwrap();
+        all.resume(&mut run, pass("start", &["a", "b"])).unwrap();
+        assert!(matches!(
+            all.resume(
+                &mut run,
+                Event::Fail {
+                    node: "a".into(),
+                    reason: "bad".into(),
+                    retry: false,
+                },
+            )
+            .unwrap(),
+            Progress::Need { ref node, .. } if node == "b"
+        ));
+        assert!(matches!(
+            all.resume(&mut run, pass("b", &[])).unwrap(),
+            Progress::Deny { .. }
+        ));
+
+        let any = Pipeline::new(
+            "start",
+            vec![
+                Node::verify("start", "start")
+                    .edge(Some("a"), "a")
+                    .edge(Some("b"), "b"),
+                Node::verify("a", "a").edge(None::<String>, "join"),
+                Node::verify("b", "b").edge(None::<String>, "join"),
+                Node::effect("join", "audit").join(Join::Any),
+            ],
+        );
+        let (mut run, _) = any.start(Context::default()).unwrap();
+        any.resume(&mut run, pass("start", &["a", "b"])).unwrap();
+        any.resume(
+            &mut run,
+            Event::Fail {
+                node: "a".into(),
+                reason: "bad".into(),
+                retry: false,
+            },
+        )
+        .unwrap();
+        assert!(matches!(
+            any.resume(
+                &mut run,
+                Event::Fail {
+                    node: "b".into(),
+                    reason: "bad".into(),
+                    retry: false,
+                },
+            )
+            .unwrap(),
+            Progress::Deny { .. }
+        ));
+    }
+
+    #[test]
+    fn restores_run_and_rejects_bad_routes() {
+        let pipeline = Pipeline::new(
+            "start",
+            vec![
+                Node::verify("start", "check").edge(Some("ok"), "done"),
+                Node::effect("done", "audit"),
+            ],
+        );
+        let (run, _) = pipeline.start(Context::default()).unwrap();
+        let encoded = serde_json::to_string(&run).unwrap();
+        let mut restored: Run = serde_json::from_str(&encoded).unwrap();
+        assert!(
+            pipeline
+                .resume(&mut restored, pass("start", &["missing"]))
+                .is_err()
+        );
+        assert!(
+            pipeline
+                .resume(&mut restored, pass("wrong", &["ok"]))
+                .is_err()
+        );
+        assert!(matches!(
+            pipeline.resume(&mut restored, pass("start", &["ok"])).unwrap(),
+            Progress::Need { ref node, .. } if node == "done"
+        ));
+    }
+
+    #[test]
+    fn enforces_global_limit_and_exposes_custom_kind() {
+        let pipeline = Pipeline::new(
+            "check",
+            vec![
+                Node::check("check", "risk_score").edge(None::<String>, "done"),
+                Node::effect("done", "audit"),
+            ],
+        )
+        .max_steps(1);
+        let (mut run, progress) = pipeline.start(Context::default()).unwrap();
+        assert!(matches!(
+            progress,
+            Progress::Need { ref node, ref kind, .. }
+                if node == "check" && kind == "risk_score"
+        ));
+        assert!(matches!(
+            pipeline.resume(&mut run, pass("check", &[])).unwrap(),
+            Progress::Need { ref node, .. } if node == "done"
+        ));
+        assert!(matches!(
+            pipeline.resume(&mut run, pass("done", &[])).unwrap(),
+            Progress::Deny { .. }
         ));
     }
 
