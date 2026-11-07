@@ -6,6 +6,8 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 pub mod services;
 pub use services::Services;
+pub mod config;
+pub use config::{Codes, EdgeConfig, NodeConfig, Op, PipelineConfig};
 
 const DEFAULT_MAX_STEPS: u32 = 128;
 
@@ -31,11 +33,13 @@ pub enum Join {
     Any,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Node {
     pub id: String,
     pub kind: Kind,
     pub fields: Vec<String>,
+    #[serde(default)]
+    pub args: Value,
     pub edges: Vec<Edge>,
     pub join: Join,
     /// Maximum number of times this node may execute. Required for cycles.
@@ -48,6 +52,7 @@ impl Node {
             id: id.into(),
             kind: Kind::Input,
             fields,
+            args: Value::Null,
             edges: Vec::new(),
             join: Join::All,
             limit: None,
@@ -78,6 +83,11 @@ impl Node {
         self
     }
 
+    pub fn args(mut self, args: Value) -> Self {
+        self.args = args;
+        self
+    }
+
     pub fn join(mut self, join: Join) -> Self {
         self.join = join;
         self
@@ -93,6 +103,7 @@ impl Node {
             id: id.into(),
             kind,
             fields: Vec::new(),
+            args: Value::Null,
             edges: Vec::new(),
             join: Join::All,
             limit: None,
@@ -250,6 +261,10 @@ impl Pipeline {
             max_steps: DEFAULT_MAX_STEPS,
             invalid,
         }
+    }
+
+    pub fn from_config(config: PipelineConfig) -> Result<Self> {
+        config.compile()
     }
 
     pub fn max_steps(mut self, max_steps: u32) -> Self {

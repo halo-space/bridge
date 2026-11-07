@@ -30,8 +30,8 @@ pub use factor::basic::magic::{MagicLinkConfig, MagicLinkPayload, MagicLinkServi
 pub use factor::enterprise::{Device, DeviceProof};
 pub use factor::oidc::{Nonce, Pkce, State};
 pub use pipeline::{
-    Context, Edge, Event, Fallback, Join, Kind, Node, Output, Pipeline, Progress, Run, Runner,
-    Services,
+    Codes, Context, Edge, EdgeConfig, Event, Fallback, Join, Kind, Node, NodeConfig, Op, Output,
+    Pipeline, PipelineConfig, Progress, Run, Runner, Services,
 };
 pub use pkg::password::{Algorithm, Argon2id, Bcrypt, Codec, Password, Pbkdf2, Sm3};
 pub use pkg::recovery::RecoveryCode;
@@ -72,13 +72,13 @@ pub mod bridge {
     pub use crate::{
         Algorithm, Argon2id, AuditEvent, AuditEventType, AuditOutcome, Bcrypt, BoxFuture,
         CaptchaChallenge, CaptchaIssuer, CaptchaType, CaptchaVerifier, CaptchaVerifyReq, Clients,
-        CodeIssuer, Codec, Context, Device, DeviceProof, Devices, Edge, Event, Events, Factors,
-        Fallback, Identity, IdpError, Join, Kind, Limits, Method, Node, Nonce, NotificationService,
-        OAuthClient, Output, Passcode, Passkeys, Password, Pbkdf2, Pipeline, Progress, Reauth,
-        RecoveryCode, RecoveryIssuer, RecoveryVerifier, Result, RiskAssessment, RiskConfig,
-        RiskDecision, RiskEngine, Run, Runner, Scene, Secrets, Sender, Services, Sm3, SmsConfig,
-        SmsSender, SmtpConfig, SmtpSender, Start, State, Totp, TotpIssuer, TotpVerifier, Users,
-        WebAuthn,
+        CodeIssuer, Codec, Codes, Context, Device, DeviceProof, Devices, Edge, EdgeConfig, Event,
+        Events, Factors, Fallback, Identity, IdpError, Join, Kind, Limits, Method, Node,
+        NodeConfig, Nonce, NotificationService, OAuthClient, Op, Output, Passcode, Passkeys,
+        Password, Pbkdf2, Pipeline, PipelineConfig, Progress, Reauth, RecoveryCode, RecoveryIssuer,
+        RecoveryVerifier, Result, RiskAssessment, RiskConfig, RiskDecision, RiskEngine, Run,
+        Runner, Scene, Secrets, Sender, Services, Sm3, SmsConfig, SmsSender, SmtpConfig,
+        SmtpSender, Start, State, Totp, TotpIssuer, TotpVerifier, Users, WebAuthn,
     };
     pub use crate::{AuthCode, AuthResult, AuthUser, Level, Rules, TotpBinding};
 }

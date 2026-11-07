@@ -19,6 +19,43 @@ Pipeline 只负责节点图、状态、路由、汇聚、重试和暂停恢复�
 
 页面配置使用固定能力码。自定义能力使用 `custom.*` 命名空间，例如 `custom.card`；页面只能引用已经注册的能力码。
 
+配置先编译校验，再创建 Pipeline：
+
+```rust
+use halo::bridge::{Codes, Op, Pipeline, PipelineConfig};
+
+let config: PipelineConfig = serde_json::from_str(json_text)?;
+let codes = Codes::new()
+    .add(Op::Verify, "password")
+    .add(Op::Verify, "custom.card");
+let pipeline: Pipeline = config.compile_with(&codes)?;
+```
+
+页面配置使用 `type`、`code` 和 `args`：
+
+```json
+{
+  "version": 1,
+  "start": "input",
+  "nodes": [
+    {
+      "id": "input",
+      "type": "input",
+      "fields": ["username", "password"],
+      "edges": [{"to": "password"}]
+    },
+    {
+      "id": "password",
+      "type": "verify",
+      "code": "password",
+      "args": {"source": "company"}
+    }
+  ]
+}
+```
+
+`code` 只代表约定的能力，具体实现仍由调用方的 `Runner` 提供。`args` 会保存在节点上，用户实现可以通过 `node.args` 读取。
+
 ```rust
 use halo::bridge::{Context, Event, Node, Pipeline, Progress};
 
