@@ -32,6 +32,8 @@ let pipeline: Pipeline = config.compile_with(&cards)?;
 let page_schema = cards.schema();
 ```
 
+创建 Runner 后调用 `cards.validate_runner(&pipeline, &runner)`，发布前即可检查实现和版本。
+
 页面配置使用 `type`、`code` 和 `args`：
 
 ```json
@@ -68,6 +70,8 @@ let value = halo::bridge::SecretRef::new("sms.tencent.secret").value();
 `Run` 会保存配置版本和 hash。恢复运行时必须使用同一份 Pipeline，配置重新发布后不会接管旧流程。
 
 Effect 节点可以配置 `once: true`，同一个持久化 Run 中只执行一次，适合审计、通知和发送类副作用。
+
+节点还可以配置 `timeout_ms`、`retries` 和 `idempotency`。这些字段会传给 Runner；具体超时执行由调用方的 async runtime 控制，外部幂等键由调用方存储保证。
 
 ```rust
 use halo::bridge::{Context, Event, Node, Pipeline, Progress};

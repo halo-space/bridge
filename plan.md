@@ -112,7 +112,9 @@
 - [x] 增加基础能力 Schema 导出
 - [x] 增加 SecretRef 配置引用
 - [x] 增加 Effect 单次执行策略
-- [ ] 增加节点超时、外部幂等键和副作用重试策略
+- [x] 增加节点 timeout/retry/idempotency 策略字段
+- [x] 增加 Runner 能力和版本校验
+- [ ] 增加调用方存储参与的分布式幂等执行器
 
 结论：`verify_token` 只做签名和 Claims 校验；需要实时状态的请求统一使用 `verify_live`。Refresh Token 换发通过 `Users` 检查租户、用户存在和 `is_active`，bridge 不维护用户数据。RSA 使用 `from_private_pem` 加载持久化密钥，`private_key_pem` 导出，`rotate` 显式轮换；全局生成只作为默认兼容入口。短信和邮件 sender 的 `strict` 模式用于生产失败闭环，关闭时保留开发 Mock 行为。Events 使用 `event.id` 幂等，并支持 trace/request 字段；写入失败由存储实现返回错误。
 

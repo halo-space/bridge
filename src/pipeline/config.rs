@@ -1,9 +1,9 @@
-use super::{Edge, Join, Node, Pipeline};
+use super::{Edge, Join, Node, Pipeline, Runner};
 use crate::error::{IdpError, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
@@ -43,6 +43,12 @@ pub struct NodeConfig {
     pub limit: Option<u32>,
     #[serde(default)]
     pub once: bool,
+    #[serde(default)]
+    pub timeout_ms: Option<u64>,
+    #[serde(default)]
+    pub retries: u32,
+    #[serde(default)]
+    pub idempotency: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -112,6 +118,9 @@ impl NodeConfig {
         node.join = self.join;
         node.limit = self.limit;
         node.once = self.once;
+        node.timeout_ms = self.timeout_ms;
+        node.retries = self.retries;
+        node.idempotency = self.idempotency;
         node.edges = self
             .edges
             .into_iter()
@@ -127,7 +136,20 @@ impl NodeConfig {
 /// 页面配置发布前使用的能力码表。未注册的 code 不允许发布。
 #[derive(Debug, Clone, Default)]
 pub struct Cards {
-    values: BTreeMap<Op, BTreeMap<String, BTreeSet<String>>>,
+    values: BTreeMap<Op, BTreeMap<String, Card>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Card {
+    pub version: u16,
+    pub args: BTreeMap<String, Arg>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Arg {
+    pub kind: String,
+    pub required: bool,
+    pub secret: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -143,6 +165,15 @@ impl SecretRef {
     pub fn value(&self) -> Value {
         json!({ "$secret": self.key })
     }
+
+    pub async fn resolve<R: Resolve>(&self, source: &R) -> Result<String> {
+        source.secret(&self.key).await
+    }
+}
+
+#[allow(async_fn_in_trait)]
+pub trait Resolve: Send + Sync {
+    async fn secret(&self, key: &str) -> Result<String>;
 }
 
 #[cfg(test)]
@@ -192,6 +223,9 @@ mod tests {
                 join: Join::All,
                 limit: None,
                 once: false,
+                timeout_ms: None,
+                retries: 0,
+                idempotency: None,
             }],
         };
         assert!(config.compile_with(&Cards::new()).is_err());
@@ -208,7 +242,10 @@ impl Cards {
             .entry(op)
             .or_default()
             .entry(code.into())
-            .or_default();
+            .or_insert_with(|| Card {
+                version: 1,
+                args: BTreeMap::new(),
+            });
         self
     }
 
@@ -216,7 +253,64 @@ impl Cards {
         self.values
             .entry(op)
             .or_default()
-            .insert(code.into(), fields.into_iter().collect());
+            .entry(code.into())
+            .or_insert_with(|| Card {
+                version: 1,
+                args: BTreeMap::new(),
+            })
+            .args
+            .extend(fields.into_iter().map(|field| {
+                (
+                    field,
+                    Arg {
+                        kind: "string".into(),
+                        required: true,
+                        secret: false,
+                    },
+                )
+            }));
+        self
+    }
+
+    pub fn version(mut self, op: Op, code: impl Into<String>, version: u16) -> Self {
+        self.values
+            .entry(op)
+            .or_default()
+            .entry(code.into())
+            .or_insert_with(|| Card {
+                version,
+                args: BTreeMap::new(),
+            })
+            .version = version;
+        self
+    }
+
+    pub fn arg(
+        mut self,
+        op: Op,
+        code: impl Into<String>,
+        name: impl Into<String>,
+        kind: impl Into<String>,
+        required: bool,
+        secret: bool,
+    ) -> Self {
+        self.values
+            .entry(op)
+            .or_default()
+            .entry(code.into())
+            .or_insert_with(|| Card {
+                version: 1,
+                args: BTreeMap::new(),
+            })
+            .args
+            .insert(
+                name.into(),
+                Arg {
+                    kind: kind.into(),
+                    required,
+                    secret,
+                },
+            );
         self
     }
 
@@ -226,12 +320,16 @@ impl Cards {
             .is_some_and(|cards| cards.contains_key(code))
     }
 
+    pub fn card(&self, op: Op, code: &str) -> Option<&Card> {
+        self.values.get(&op).and_then(|cards| cards.get(code))
+    }
+
     pub fn schema(&self) -> Value {
         let mut operations = serde_json::Map::new();
         for (op, cards) in &self.values {
             let values = cards
                 .iter()
-                .map(|(code, args)| json!({ "code": code, "args": args }))
+                .map(|(code, card)| json!({ "code": code, "version": card.version, "args": card.args }))
                 .collect::<Vec<_>>();
             operations.insert(format!("{op:?}").to_lowercase(), Value::Array(values));
         }
@@ -250,14 +348,9 @@ impl Cards {
                     node.op, code
                 )));
             }
-            let required = self
-                .values
-                .get(&node.op)
-                .and_then(|cards| cards.get(code))
-                .cloned()
-                .unwrap_or_default();
-            for field in required {
-                if node.args.get(&field).is_none() {
+            let card = self.card(node.op, code).expect("supports checked above");
+            for (field, arg) in &card.args {
+                if arg.required && node.args.get(field).is_none() {
                     return Err(IdpError::Internal(format!(
                         "Pipeline capability argument is missing: {:?}/{} -> {}",
                         node.op, code, field
@@ -266,5 +359,48 @@ impl Cards {
             }
         }
         Ok(())
+    }
+
+    pub fn validate_runner<R: Runner>(&self, pipeline: &Pipeline, runner: &R) -> Result<()> {
+        for node in pipeline.nodes() {
+            if matches!(node.kind, super::Kind::Input) {
+                continue;
+            }
+            if !runner.supports(node) {
+                return Err(IdpError::Unsupported(node.id.clone()));
+            }
+            if let Some(code) = node_code(&node.kind) {
+                let op = node_op(&node.kind);
+                if let Some(card) = self.card(op, code) {
+                    if runner.version(node) != card.version {
+                        return Err(IdpError::Internal(format!(
+                            "Pipeline capability version mismatch: {:?}/{}",
+                            op, code
+                        )));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+fn node_code(kind: &super::Kind) -> Option<&str> {
+    match kind {
+        super::Kind::Input => None,
+        super::Kind::Check(code)
+        | super::Kind::Issue(code)
+        | super::Kind::Verify(code)
+        | super::Kind::Effect(code) => Some(code),
+    }
+}
+
+fn node_op(kind: &super::Kind) -> Op {
+    match kind {
+        super::Kind::Input => Op::Input,
+        super::Kind::Check(_) => Op::Check,
+        super::Kind::Issue(_) => Op::Issue,
+        super::Kind::Verify(_) => Op::Verify,
+        super::Kind::Effect(_) => Op::Effect,
     }
 }

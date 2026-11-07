@@ -7,7 +7,9 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 pub mod services;
 pub use services::Services;
 pub mod config;
-pub use config::{Cards, EdgeConfig, NodeConfig, Op, PipelineConfig, SecretRef};
+pub use config::{
+    Arg, Card, Cards, EdgeConfig, NodeConfig, Op, PipelineConfig, Resolve, SecretRef,
+};
 
 const DEFAULT_MAX_STEPS: u32 = 128;
 
@@ -42,6 +44,12 @@ pub struct Node {
     pub args: Value,
     #[serde(default)]
     pub once: bool,
+    #[serde(default)]
+    pub timeout_ms: Option<u64>,
+    #[serde(default)]
+    pub retries: u32,
+    #[serde(default)]
+    pub idempotency: Option<String>,
     pub edges: Vec<Edge>,
     pub join: Join,
     /// Maximum number of times this node may execute. Required for cycles.
@@ -56,6 +64,9 @@ impl Node {
             fields,
             args: Value::Null,
             once: false,
+            timeout_ms: None,
+            retries: 0,
+            idempotency: None,
             edges: Vec::new(),
             join: Join::All,
             limit: None,
@@ -96,6 +107,21 @@ impl Node {
         self
     }
 
+    pub fn timeout(mut self, timeout_ms: u64) -> Self {
+        self.timeout_ms = Some(timeout_ms.max(1));
+        self
+    }
+
+    pub fn retries(mut self, retries: u32) -> Self {
+        self.retries = retries;
+        self
+    }
+
+    pub fn idempotency(mut self, key: impl Into<String>) -> Self {
+        self.idempotency = Some(key.into());
+        self
+    }
+
     pub fn join(mut self, join: Join) -> Self {
         self.join = join;
         self
@@ -113,6 +139,9 @@ impl Node {
             fields: Vec::new(),
             args: Value::Null,
             once: false,
+            timeout_ms: None,
+            retries: 0,
+            idempotency: None,
             edges: Vec::new(),
             join: Join::All,
             limit: None,
@@ -180,6 +209,10 @@ pub enum Output {
 pub trait Runner: Send + Sync {
     fn supports(&self, _node: &Node) -> bool {
         true
+    }
+
+    fn version(&self, _node: &Node) -> u16 {
+        1
     }
 
     async fn run(&self, node: &Node, context: &Context) -> Result<Output>;
@@ -481,9 +514,11 @@ impl Pipeline {
                     at,
                     data: data.clone(),
                 });
-                if node.once && matches!(node.kind, Kind::Effect(_)) {
+                if (node.once || node.idempotency.is_some()) && matches!(node.kind, Kind::Effect(_))
+                {
+                    let effect_key = node.idempotency.clone().unwrap_or_else(|| current.clone());
                     run.effects.insert(
-                        current.clone(),
+                        effect_key,
                         Effect {
                             routes: routes.clone(),
                             data: data.clone(),
@@ -559,8 +594,9 @@ impl Pipeline {
         if !runner.supports(node) {
             return Err(IdpError::Unsupported(format!("{}", node.id)));
         }
-        if node.once {
-            if let Some(effect) = run.effects.get(&node_id).cloned() {
+        let effect_key = node.idempotency.clone().unwrap_or_else(|| node_id.clone());
+        if node.once || node.idempotency.is_some() {
+            if let Some(effect) = run.effects.get(&effect_key).cloned() {
                 return self.resume(
                     run,
                     Event::Pass {
