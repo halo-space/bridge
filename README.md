@@ -56,7 +56,7 @@ Bridge 不保存业务用户，也不执行账号绑定。Provider 只把第三�
 | UserInfo、Introspection、隐式授权 | 边界已确定 | 不维护业务用户；调用方用 `verify_live` 组装 Introspection；只支持 Authorization Code + PKCE |
 | Passkey / WebAuthn | 已实现 | 注册、认证、状态标记、计数器 CAS、`last_used_at` 和真实协议 fixture 已覆盖；状态单次消费由调用方存储保证 |
 | Device | 待实现 | 当前只保留模块边界 |
-| Pipeline | 已实现 | 支持输入、检查、签发、校验、后置动作、上下文传递、重试、拒绝和暂停继续 |
+| Pipeline | 已实现 | 支持输入、检查、签发、校验、后置动作、路由分支、All/Any 汇聚、有限循环、上下文传递、重试、拒绝和暂停继续 |
 | 风险决策和审计模型 | 已实现 | 由调用方负责持久化和策略接入 |
 
 ## 类型和存储
