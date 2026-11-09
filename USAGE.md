@@ -353,10 +353,33 @@ Run 会拒绝持久化密码、验证码、Token、state、nonce 等敏感字段
 流程：
 
 ```text
-input(account, password)
-  → verify(password)
-  → audit
-  → Done
+1. 输入账号和密码
+   input(account, password)
+2. 校验账号密码
+   verify(password)
+3. 写入认证审计事件
+   effect(audit)
+4. Pipeline 返回 Done
+```
+
+这里的 `password` 是能力码，不是字段名。`verify(password)` 会读取上游 `input` 节点传下来的 `account` 和 `password`：
+
+```text
+input 节点
+  输入：account、password
+  作用：收集用户输入，不查询用户，也不判断密码
+
+verify(password) 节点
+  输入：account、password
+  执行：调用方提供的 Users Store 查询账号，使用密码算法校验哈希
+  结果：成功时输出 Identity，失败时返回 InvalidCredentials
+
+effect(audit) 节点
+  输入：认证结果和请求上下文
+  执行：调用 Events Store 写入审计事件
+
+Done
+  含义：bridge 认证流程完成；调用方此时才签发自己的应用 Token 或创建 Session
 ```
 
 节点构造：
@@ -373,20 +396,32 @@ let pipeline = Pipeline::new(
 );
 ```
 
-默认 `Services` 会从调用方的 `Users` Store 查询账号并校验密码。账号表、密码哈希和密码算法由调用方保存；自定义密码算法可以实现自己的 Runner 或注入 `Codecs`。
+默认 `Services` 会从调用方的 `Users` Store 查询账号并校验密码。账号表、密码哈希和密码算法由调用方保存；自定义密码算法可以实现自己的 Runner 或注入 `Codecs`。如果没有 `Users` Store，或者使用自己的账号系统，就用自定义 Runner 替换这个 `verify(password)` 节点。
 
 ### 5.2 手机号、滑块、短信验证码
 
 流程：
 
 ```text
-input(phone)
-  → verify(captcha.slider)
-  → issue(sms)
-  → effect(sms.send)
-  → input(code)
-  → verify(sms)
-  → Done
+1. 输入手机号：`input(phone)`
+2. 校验人机验证：`verify(captcha.slider)`
+3. 生成短信验证码：`issue(sms)`
+4. 发送短信：`effect(sms.send)`
+5. 输入短信验证码：`input(code)`
+6. 校验短信验证码：`verify(sms)`
+7. 返回 `Done`
+```
+
+每一步的实际含义：
+
+```text
+input(phone)          只收集手机号
+captcha.slider        读取用户提交的滑块结果并校验
+issue(sms)            生成验证码并写入 Secrets
+effect(sms.send)      从 Secrets 读取验证码并调用短信 Sender
+input(code)           收集用户输入的短信验证码
+verify(sms)           消费并校验验证码，成功后输出 Identity
+Done                  调用方可以签发自己的应用登录结果
 ```
 
 节点构造：
@@ -417,12 +452,14 @@ let pipeline = Pipeline::new(
 流程：
 
 ```text
-input(account, password)
-  → verify(password)
-  → input(code)
-  → verify(totp)
-  → Done
+1. 输入账号密码：`input(account, password)`
+2. 校验账号密码：`verify(password)`
+3. 输入动态码：`input(code)`
+4. 校验 TOTP：`verify(totp)`
+5. 返回 `Done`
 ```
+
+这里先由密码节点建立身份，再由 `Factors` Store 按这个身份读取 TOTP 绑定。TOTP 校验成功后才算整个 Pipeline 完成；仅密码校验成功不能直接签发最终登录结果。
 
 TOTP Secret 不由 bridge 保存。`Factors` Store 根据调用方身份返回绑定信息，调用方负责 Secret 加密、轮换和解绑。
 
@@ -445,12 +482,13 @@ let pipeline = Pipeline::new(
 Passkey 通常分成签发注册/认证选项和校验浏览器返回值：
 
 ```text
-password
-  → issue(webauthn)
-  → input(credential)
-  → verify(passkey)
-  → Done
+1. 已有身份进入 Passkey：`issue(webauthn)`
+2. 把浏览器返回值提交给：`input(credential)`
+3. 校验浏览器凭证：`verify(passkey)`
+4. 返回 `Done`
 ```
+
+`issue(webauthn)` 只生成浏览器需要的 options 和 state；它不是校验。`verify(passkey)` 才会验证签名、challenge、凭证 ID 和计数器，并把新的计数器交给 `Passkeys::update` 保存。
 
 调用方负责：
 
@@ -467,9 +505,9 @@ bridge 不保存浏览器 Session，也不决定一个用户是否必须启用 P
 密码校验可以返回命名路由：
 
 ```text
-password
-  ├── normal → audit → Done
-  └── risk   → totp  → audit → Done
+1. `verify(password)` 校验成功后返回一个 route
+2. `normal` 路由：写审计并完成
+3. `risk` 路由：先输入并校验 TOTP，再写审计并完成
 ```
 
 ```rust
@@ -502,7 +540,7 @@ Pipeline 不解析脚本表达式；风险判断由调用方 Runner 或风险模
 
 ### 5.6 All 和 Any
 
-`Join::All` 要求所有激活分支完成：
+`Join::All` 要求所有激活分支完成。它表示“每一条被激活的认证路径都必须成功”：
 
 ```rust
 Node::effect("join", "audit").join(Join::All)
@@ -510,7 +548,7 @@ Node::effect("join", "audit").join(Join::All)
 
 适合“密码和 Passkey 都必须通过”。任一分支不可重试失败，整体拒绝。
 
-`Join::Any` 任一分支成功即可继续：
+`Join::Any` 任一分支成功即可继续。它表示“密码或 Passkey 任意一种通过即可”：
 
 ```rust
 Node::effect("join", "audit").join(Join::Any)
@@ -520,7 +558,7 @@ Node::effect("join", "audit").join(Join::Any)
 
 ### 5.7 有限重试和循环
 
-节点重试次数由 `retries` 控制，循环节点还必须设置 `limit`：
+节点重试次数由 `retries` 控制，循环节点还必须设置 `limit`。例如下面表示最多向 Runner 重试两次，同时整个节点最多进入三次：
 
 ```rust
 Node::verify("captcha", "captcha.slider")
