@@ -119,7 +119,7 @@ fn test_password_algorithms_and_unknown_code() {
 #[test]
 fn test_rsa_crypto_decrypt() {
     use halo::pkg::rsa::RsaCrypto;
-    let pem = RsaCrypto::global().get_public_key_pem();
+    let pem = RsaCrypto::global().public_pem();
     assert!(pem.contains("-----BEGIN PUBLIC KEY-----"));
 
     // Test raw string fallback
@@ -136,7 +136,7 @@ async fn test_social_and_enterprise_providers() {
         scope: None,
     });
     let gh_url = gh
-        .get_authorize_url("state_abc", "https://halo.run/oauth/github/callback")
+        .authorize_url("state_abc", "https://halo.run/oauth/github/callback")
         .unwrap();
     assert!(gh_url.contains("client_id=gh_client_123"));
     assert!(gh_url.contains("redirect_uri=https%3A%2F%2Fhalo.run%2Foauth%2Fgithub%2Fcallback"));
@@ -148,7 +148,7 @@ async fn test_social_and_enterprise_providers() {
         "email": "octocat@github.com",
         "avatar_url": "https://avatars.githubusercontent.com/u/987654"
     });
-    let profile = factor::social::GithubProvider::parse_user_json(&gh_user).unwrap();
+    let profile = factor::social::GithubProvider::parse(&gh_user).unwrap();
     assert_eq!(profile.provider, "github");
     assert_eq!(profile.openid, "987654");
     assert_eq!(profile.email, Some("octocat@github.com".into()));
@@ -160,11 +160,11 @@ async fn test_social_and_enterprise_providers() {
         scope: None,
     });
     let wx_url = wx
-        .get_authorize_url("state_xyz", "https://halo.run/oauth/wechat/callback")
+        .authorize_url("state_xyz", "https://halo.run/oauth/wechat/callback")
         .unwrap();
     assert!(wx_url.contains("appid=wx123456789"));
     assert!(wx_url.contains("#wechat_redirect"));
-    let wx_profile = factor::social::WechatProvider::parse_user_json(&serde_json::json!({
+    let wx_profile = factor::social::WechatProvider::parse(&serde_json::json!({
         "openid": "wx-openid",
         "unionid": "wx-unionid",
         "nickname": "WeChat User",
@@ -180,10 +180,10 @@ async fn test_social_and_enterprise_providers() {
         scope: None,
     });
     let google_url = google
-        .get_authorize_url("state_google", "https://halo.run/oauth/google/callback")
+        .authorize_url("state_google", "https://halo.run/oauth/google/callback")
         .unwrap();
     assert!(google_url.contains("client_id=google-client"));
-    let google_profile = factor::social::GoogleProvider::parse_user_json(&serde_json::json!({
+    let google_profile = factor::social::GoogleProvider::parse(&serde_json::json!({
         "sub": "google-sub",
         "name": "Google User",
         "email": "google@example.com",
@@ -200,7 +200,7 @@ async fn test_social_and_enterprise_providers() {
         corp_secret: "secret".into(),
     });
     let wecom_url = wecom
-        .get_authorize_url("state_wecom", "https://halo.run/oauth/wecom/callback")
+        .authorize_url("state_wecom", "https://halo.run/oauth/wecom/callback")
         .unwrap();
     assert!(wecom_url.contains("appid=corp_123"));
 
@@ -209,7 +209,7 @@ async fn test_social_and_enterprise_providers() {
         client_secret: "dt_secret".into(),
     });
     let dt_url = dt
-        .get_authorize_url("state_dt", "https://halo.run/oauth/dingtalk/callback")
+        .authorize_url("state_dt", "https://halo.run/oauth/dingtalk/callback")
         .unwrap();
     assert!(dt_url.contains("client_id=dt_app_id"));
 
@@ -338,7 +338,7 @@ fn test_token_issue_and_verify_rs256_and_jwks() {
     assert_eq!(claims.username, "rs256_user");
 
     let verified_aud = service
-        .verify_token_with_audience(&access, "halo-client")
+        .verify_audience(&access, "halo-client")
         .expect("verify audience");
     assert_eq!(verified_aud.aud, Some("halo-client".to_string()));
 

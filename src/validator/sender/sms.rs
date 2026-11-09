@@ -117,12 +117,7 @@ impl SmsSender {
             && !self.config.access_key_secret.trim().is_empty()
     }
 
-    pub async fn send_verification_code(
-        &self,
-        phone: &str,
-        code: &str,
-        ttl_secs: u64,
-    ) -> Result<()> {
+    pub async fn send_code(&self, phone: &str, code: &str, ttl_secs: u64) -> Result<()> {
         if self.unsupported {
             return Err(Error::SmsFailed(format!(
                 "Unsupported SMS provider: {}",
@@ -163,7 +158,7 @@ mod tests {
             ..SmsConfig::default()
         });
         let error = sender
-            .send_verification_code("13800138000", "123456", 300)
+            .send_code("13800138000", "123456", 300)
             .await
             .unwrap_err();
         assert!(matches!(error, Error::SmsFailed(message) if message.contains("sdk_app_id")));
@@ -191,12 +186,7 @@ mod tests {
             },
             Test,
         );
-        assert!(
-            sender
-                .send_verification_code("13800138000", "123456", 300)
-                .await
-                .is_ok()
-        );
+        assert!(sender.send_code("13800138000", "123456", 300).await.is_ok());
     }
 
     #[tokio::test]
@@ -206,7 +196,7 @@ mod tests {
             ..SmsConfig::default()
         });
         let error = sender
-            .send_verification_code("13800138000", "123456", 300)
+            .send_code("13800138000", "123456", 300)
             .await
             .unwrap_err();
         assert!(
@@ -249,7 +239,7 @@ mod tests {
             ..SmsConfig::default()
         });
         sender
-            .send_verification_code("13800138000", "123456", 300)
+            .send_code("13800138000", "123456", 300)
             .await
             .unwrap();
         server.await.unwrap();

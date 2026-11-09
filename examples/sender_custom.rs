@@ -22,7 +22,5 @@ async fn main() -> halo::Result<()> {
         },
         CompanySms,
     );
-    sender
-        .send_verification_code("13800138000", "123456", 300)
-        .await
+    sender.send_code("13800138000", "123456", 300).await
 }

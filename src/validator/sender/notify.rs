@@ -45,14 +45,10 @@ impl NotificationService {
         match channel {
             NotifyChannel::Email => {
                 self.mailer
-                    .send_verification_code(target, code, scene, ttl_seconds)
+                    .send_code(target, code, scene, ttl_seconds)
                     .await
             }
-            NotifyChannel::Sms => {
-                self.sms
-                    .send_verification_code(target, code, ttl_seconds)
-                    .await
-            }
+            NotifyChannel::Sms => self.sms.send_code(target, code, ttl_seconds).await,
         }
     }
 

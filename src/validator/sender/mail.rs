@@ -165,13 +165,7 @@ impl SmtpSender {
     }
 
     /// 发送 6 位安全身份核验验证码
-    pub async fn send_verification_code(
-        &self,
-        to: &str,
-        code: &str,
-        scene: &str,
-        ttl_secs: u64,
-    ) -> Result<()> {
+    pub async fn send_code(&self, to: &str, code: &str, scene: &str, ttl_secs: u64) -> Result<()> {
         let (scene_label, scene_desc) = match scene {
             "login" | "login_sms" => ("登录验证", "用于验证您的身份并登录企业控制台"),
             "register" => ("账号注册", "用于激活并完成您的新账号注册"),
@@ -308,7 +302,7 @@ mod tests {
         let sender = SmtpSender::new(cfg);
         // 未激活状态下不发外网，记录日志并返回 Ok
         let res = sender
-            .send_verification_code("test@example.com", "123456", "login", 300)
+            .send_code("test@example.com", "123456", "login", 300)
             .await;
         assert!(res.is_ok());
     }
@@ -320,7 +314,7 @@ mod tests {
             ..SmtpConfig::default()
         });
         let res = sender
-            .send_verification_code("test@example.com", "123456", "login", 300)
+            .send_code("test@example.com", "123456", "login", 300)
             .await;
         assert!(matches!(res, Err(Error::EmailFailed(_))));
     }

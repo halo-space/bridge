@@ -45,7 +45,7 @@ impl GithubProvider {
     }
 
     /// 构造 GitHub OAuth 授权重定向跳转 URL
-    pub fn get_authorize_url(&self, state: &str, redirect_uri: &str) -> Result<String> {
+    pub fn authorize_url(&self, state: &str, redirect_uri: &str) -> Result<String> {
         let mut u = Url::parse(&format!(
             "{}/login/oauth/authorize",
             self.endpoint.trim_end_matches('/')
@@ -67,7 +67,7 @@ impl GithubProvider {
     }
 
     /// 从 GitHub API 返回的用户信息解析为标准化 SocialProfile
-    pub fn parse_user_json(user_json: &serde_json::Value) -> Result<SocialProfile> {
+    pub fn parse(user_json: &serde_json::Value) -> Result<SocialProfile> {
         let id = user_json["id"]
             .as_i64()
             .map(|i| i.to_string())
@@ -178,6 +178,6 @@ impl GithubProvider {
             }
         }
 
-        Self::parse_user_json(&user_json)
+        Self::parse(&user_json)
     }
 }

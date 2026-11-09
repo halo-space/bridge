@@ -38,7 +38,7 @@ impl WechatProvider {
     }
 
     /// 构造微信扫码登录跳转链接 (PC 网站应用 snsapi_login)
-    pub fn get_authorize_url(&self, state: &str, redirect_uri: &str) -> Result<String> {
+    pub fn authorize_url(&self, state: &str, redirect_uri: &str) -> Result<String> {
         let mut u = Url::parse("https://open.weixin.qq.com/connect/qrconnect")
             .map_err(|e| Error::Internal(e.to_string()))?;
 
@@ -54,7 +54,7 @@ impl WechatProvider {
     }
 
     /// 从微信 sns/userinfo 响应解析为标准化 SocialProfile
-    pub fn parse_user_json(user_json: &serde_json::Value) -> Result<SocialProfile> {
+    pub fn parse(user_json: &serde_json::Value) -> Result<SocialProfile> {
         let openid = user_json["openid"]
             .as_str()
             .ok_or_else(|| Error::OAuthError("Missing WeChat openid".into()))?
@@ -162,6 +162,6 @@ impl WechatProvider {
                 "WeChat userinfo failed: {message}"
             )));
         }
-        Self::parse_user_json(&user_json)
+        Self::parse(&user_json)
     }
 }

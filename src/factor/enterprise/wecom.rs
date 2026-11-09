@@ -38,7 +38,7 @@ impl WecomProvider {
     }
 
     /// 构造企业微信 Web 扫码授权或企业微信内静默授权链接
-    pub fn get_authorize_url(&self, state: &str, redirect_uri: &str) -> Result<String> {
+    pub fn authorize_url(&self, state: &str, redirect_uri: &str) -> Result<String> {
         let mut u = Url::parse("https://open.work.weixin.qq.com/wwopen/sso/qrConnect")
             .map_err(|e| Error::Internal(e.to_string()))?;
 

@@ -238,7 +238,7 @@ impl TokenService {
     }
 
     /// 校验并解析 Access Token 并精确验证 Audience
-    pub fn verify_token_with_audience(&self, token: &str, audience: &str) -> Result<Claims> {
+    pub fn verify_audience(&self, token: &str, audience: &str) -> Result<Claims> {
         self.validate_config()?;
         let alg = if self.rsa_public_pem.is_some() {
             Algorithm::RS256

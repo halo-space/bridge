@@ -71,12 +71,12 @@ impl RsaCrypto {
     }
 
     /// 获取内部 RSA 公钥引用
-    pub fn get_public_key(&self) -> &RsaPublicKey {
+    pub fn public_key(&self) -> &RsaPublicKey {
         &self.public_key
     }
 
     /// 获取 SPKI 格式的 PEM 公钥字符串
-    pub fn get_public_key_pem(&self) -> &str {
+    pub fn public_pem(&self) -> &str {
         &self.public_key_pem
     }
 
@@ -121,18 +121,18 @@ mod tests {
         let crypto = RsaCrypto::new().unwrap();
         let pem = crypto.private_key_pem().unwrap();
         let restored = RsaCrypto::from_private_pem(&pem).unwrap();
-        assert_eq!(crypto.get_public_key_pem(), restored.get_public_key_pem());
+        assert_eq!(crypto.public_pem(), restored.public_pem());
 
         let mut rng = OsRng;
         let cipher = crypto
-            .get_public_key()
+            .public_key()
             .encrypt(&mut rng, Oaep::new::<Sha256>(), b"secret")
             .unwrap();
         let encoded = BASE64_STANDARD.encode(cipher);
         assert_eq!(restored.decrypt_oaep(&encoded).unwrap(), "secret");
         assert_ne!(
-            crypto.get_public_key_pem(),
-            RsaCrypto::rotate().unwrap().get_public_key_pem()
+            crypto.public_pem(),
+            RsaCrypto::rotate().unwrap().public_pem()
         );
     }
 }

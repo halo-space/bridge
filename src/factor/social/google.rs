@@ -45,7 +45,7 @@ impl GoogleProvider {
     }
 
     /// 构造 Google OAuth2 授权跳转链接
-    pub fn get_authorize_url(&self, state: &str, redirect_uri: &str) -> Result<String> {
+    pub fn authorize_url(&self, state: &str, redirect_uri: &str) -> Result<String> {
         let mut u = Url::parse("https://accounts.google.com/o/oauth2/v2/auth")
             .map_err(|e| Error::Internal(e.to_string()))?;
 
@@ -66,7 +66,7 @@ impl GoogleProvider {
     }
 
     /// 从 Google userinfo 响应解析为标准化 SocialProfile
-    pub fn parse_user_json(user_json: &serde_json::Value) -> Result<SocialProfile> {
+    pub fn parse(user_json: &serde_json::Value) -> Result<SocialProfile> {
         let sub = user_json["sub"]
             .as_str()
             .ok_or_else(|| Error::OAuthError("Missing Google sub identifier".into()))?
@@ -139,6 +139,6 @@ impl GoogleProvider {
             .json()
             .await
             .map_err(|e| Error::OAuthError(format!("Invalid Google userinfo JSON: {e}")))?;
-        Self::parse_user_json(&user_json)
+        Self::parse(&user_json)
     }
 }

@@ -37,7 +37,7 @@ impl FeishuProvider {
     }
 
     /// 构造飞书网页登录跳转链接
-    pub fn get_authorize_url(&self, state: &str, redirect_uri: &str) -> Result<String> {
+    pub fn authorize_url(&self, state: &str, redirect_uri: &str) -> Result<String> {
         let mut u = Url::parse("https://passport.feishu.cn/suite/pas/oauth/authorize")
             .map_err(|e| Error::Internal(e.to_string()))?;
 
@@ -50,7 +50,7 @@ impl FeishuProvider {
     }
 
     /// 从飞书 authen/v1/user_info 解析为标准化 SocialProfile
-    pub fn parse_user_json(user_json: &serde_json::Value) -> Result<SocialProfile> {
+    pub fn parse(user_json: &serde_json::Value) -> Result<SocialProfile> {
         let data = if user_json.get("data").is_some() {
             &user_json["data"]
         } else {
@@ -172,6 +172,6 @@ impl FeishuProvider {
             .await
             .map_err(|e| Error::OAuthError(format!("Invalid Feishu user_info JSON: {e}")))?;
 
-        Self::parse_user_json(&user_json)
+        Self::parse(&user_json)
     }
 }
