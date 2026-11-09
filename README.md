@@ -121,7 +121,7 @@ Pipeline 的 `Services` 是 bridge 提供的可选默认适配器，不是能力
 
 `Cards::schema()` 可生成页面编辑器使用的 JSON Schema、能力码和每个 Card 的参数 Schema；编译时会校验参数类型、未知参数和 Secret 引用。敏感配置使用 `secret("...")` 保存引用，真实密钥由应用层解析。
 
-发布配置后可以调用 `Cards::validate_runner` 检查实际 Runner 是否支持所有能力和版本。
+发布配置后可以调用 `Cards::run` 预检查实际 Runner 是否支持所有能力和版本；它只检查兼容性，真正执行仍使用 `Pipeline::run`。
 
 配置编译后会生成版本和 hash，运行中的 `Run` 会绑定这两个值；页面发布新配置不会改变已经开始的认证流程。`Context` 还支持 `protocol`、`connection`、`request` 和 `meta`，用于传递请求和身份源上下文。
 

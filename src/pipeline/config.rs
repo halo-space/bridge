@@ -485,7 +485,10 @@ impl Cards {
         Ok(())
     }
 
-    pub fn validate_runner<R: Runner>(&self, pipeline: &Pipeline, runner: &R) -> Result<()> {
+    /// 发布前检查 Pipeline 中的能力是否有匹配的 Runner 实现和版本。
+    ///
+    /// 这里只做兼容性预检查，不执行任何认证节点；真正执行由 `Pipeline::run` 完成。
+    pub fn run<R: Runner>(&self, pipeline: &Pipeline, runner: &R) -> Result<()> {
         for node in pipeline.nodes() {
             if matches!(node.kind, super::Kind::Input) {
                 continue;

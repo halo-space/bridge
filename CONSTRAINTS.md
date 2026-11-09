@@ -17,6 +17,7 @@
 - 子模块已经表达能力时，文件内类型不要重复添加同一前缀或后缀。例如 `sender/sms/tencent.rs` 中使用 `Tencent`，不使用 `SmsTencent`、`TencentSmsSender`。
 - 不使用无语义的缩写和复杂拼接；避免 `Manager`、`Service`、`Handler`、`Processor` 等泛化后缀，除非类型确实承担该职责。
 - 公共 API 使用统一词汇；同一概念不得同时使用多个名字。
+- 方法名优先使用所属类型提供的上下文，避免重复拼接对象名；例如使用 `Cards::run`，不写成 `Cards::validate_runner`。
 - 新代码不得引入 `idp` 作为模块、日志目标或公共类型命名。
 - 使用 Rust 2024 的路径模块布局，不新增 `mod.rs`；父模块使用同名 `.rs` 文件，子模块放在同名目录。
 

@@ -229,7 +229,9 @@ use halo::bridge::{Pipeline, PipelineConfig};
 
 let config: PipelineConfig = serde_json::from_str(json_text)?;
 let pipeline: Pipeline = config.compile_with(&cards)?;
-cards.validate_runner(&pipeline, &runner)?;
+// 发布前预检查：Pipeline 中的能力是否都能由这个 Runner 执行。
+// 这里只检查兼容性，不执行登录；真正执行使用 pipeline.run(...)。
+cards.run(&pipeline, &runner)?;
 ```
 
 配置发布后会生成版本和 hash。恢复旧 Run 时必须使用相同配置；新发布的配置不会接管已经开始的认证流程。
