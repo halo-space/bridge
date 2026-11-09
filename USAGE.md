@@ -8,12 +8,14 @@
 
 ```toml
 [dependencies]
+# 包名是 halo-bridge，Rust 代码中的库名是 halo。
 halo = { package = "halo-bridge", version = "0.4" }
 ```
 
 业务代码通常从统一入口导入 bridge 的公共类型：
 
 ```rust
+// 导入 bridge 对外暴露的 Pipeline、Store、Runner 和认证模型。
 use halo::bridge::*;
 ```
 
@@ -21,6 +23,7 @@ use halo::bridge::*;
 
 ```toml
 [dependencies]
+# 关闭默认 full feature，只编译核心能力。
 halo = { package = "halo-bridge", version = "0.4", default-features = false }
 ```
 
@@ -191,6 +194,7 @@ let schema = cards.schema();
 自定义能力使用 `custom.*` 命名空间：
 
 ```rust
+// 只允许页面使用这个自定义能力码；具体执行仍由自定义 Runner 提供。
 let cards = cards.add(Op::Verify, "custom.employee_card");
 ```
 
@@ -263,13 +267,13 @@ cards.run(&pipeline, &runner)?;
 
 ```rust
 let services = Services::new(
-    secrets,
-    users,
-    factors,
-    passkeys,
-    events,
-    devices,
-    notifications,
+    secrets,       // 验证码、state、nonce 和单次凭证
+    users,         // 账号和密码查询
+    factors,       // TOTP 绑定查询
+    passkeys,      // Passkey 查询和计数器更新
+    events,        // 审计写入
+    devices,       // Device 查询和更新
+    notifications, // 短信和邮件发送
 );
 ```
 
@@ -299,6 +303,7 @@ impl Runner for CompanyRunner {
 保留默认能力，同时覆盖一部分节点：
 
 ```rust
+// CompanyRunner 优先处理它支持的节点，Services 处理其余内置节点。
 let runner = Fallback::new(CompanyRunner, services);
 ```
 
@@ -312,11 +317,12 @@ let runner = Fallback::new(CompanyRunner, services);
 
 ```rust
 let context = Context {
-    protocol: Some("password".into()),
-    connection: Some("browser".into()),
+    protocol: Some("password".into()), // 当前认证方式
+    connection: Some("browser".into()), // 当前客户端平台
     ..Context::default()
 };
 
+// start 创建短期 Run，并返回第一个需要处理的节点。
 let (mut run, progress) = pipeline.start(context)?;
 ```
 
@@ -327,11 +333,12 @@ let (mut run, progress) = pipeline.start(context)?;
 ```rust
 match progress {
     Progress::Need { node, kind, fields } => {
+        // 根据 fields 收集用户输入，或调用 Runner 执行该节点。
         println!("node={node}, kind={kind}, fields={fields:?}");
     }
-    Progress::Done => println!("already done"),
-    Progress::Retry { node, reason } => println!("retry {node}: {reason}"),
-    Progress::Deny { node, reason } => println!("deny {node}: {reason}"),
+    Progress::Done => println!("already done"), // 流程已经完成
+    Progress::Retry { node, reason } => println!("retry {node}: {reason}"), // 可重试
+    Progress::Deny { node, reason } => println!("deny {node}: {reason}"), // 拒绝并结束
 }
 ```
 
@@ -345,15 +352,16 @@ match progress {
 let progress = pipeline.resume(
     &mut run,
     Event::Input {
-        node: "input".into(),
+        node: "input".into(), // 必须是当前等待输入的节点
         data: serde_json::json!({
             "account": "alice",
             "password": "secret"
         }),
-        at: chrono::Utc::now().timestamp(),
+        at: chrono::Utc::now().timestamp(), // 调用方记录输入时间
     },
 )?;
 
+// 让 Runner 自动推进后续校验、签发、发送和审计节点。
 let progress = pipeline.run(&mut run, &runner).await?;
 ```
 
@@ -375,7 +383,9 @@ let encoded = serde_json::to_vec(&run)?;
 恢复时必须加载同一版本的 Pipeline：
 
 ```rust
+// 从持久化数据恢复上一次登录运行状态。
 let mut run: Run = serde_json::from_slice(&encoded)?;
+// 使用发布时的同一份 Pipeline 继续执行。
 let progress = pipeline.run(&mut run, &runner).await?;
 ```
 
@@ -423,11 +433,16 @@ Done
 
 ```rust
 let pipeline = Pipeline::new(
+    // 从 input 节点开始执行。
     "input",
     vec![
+        // 收集账号和密码；input 不查询用户，也不校验密码。
         Node::input("input", vec!["account".into(), "password".into()])
+            // 没有命名 route，表示沿默认边进入 password。
             .edge(None::<String>, "password"),
+        // 使用 password 能力校验上游传来的 account 和 password。
         Node::verify("password", "password").edge(None::<String>, "audit"),
+        // 使用 audit effect 写入审计，并且同一个 Run 只执行一次。
         Node::effect("audit", "audit").once(true),
     ],
 );
@@ -467,18 +482,27 @@ Done                  调用方可以签发自己的应用登录结果
 
 ```rust
 let pipeline = Pipeline::new(
+    // 手机号是整个流程的起点。
     "phone",
     vec![
+        // 收集用户输入的手机号。
         Node::input("phone", vec!["phone".into()])
+            // 默认进入 captcha 节点。
             .edge(None::<String>, "captcha"),
+        // 校验滑块结果；通过后进入短信签发。
         Node::verify("captcha", "captcha.slider")
             .edge(None::<String>, "issue"),
+        // 生成短信验证码并把短期材料写入 Secrets。
         Node::issue("issue", "sms")
             .edge(None::<String>, "send"),
+        // 从 Secrets 读取验证码并调用短信 Sender。
         Node::effect("send", "sms.send")
             .edge(None::<String>, "code"),
+        // 收集用户输入的短信验证码。
         Node::input("code", vec!["code".into()])
+            // 默认进入短信校验节点。
             .edge(None::<String>, "check"),
+        // 消费并校验短信验证码，成功后输出 Identity。
         Node::verify("check", "sms"),
     ],
 );
@@ -513,13 +537,20 @@ TOTP Secret 不由 bridge 保存。`Factors` Store 根据调用方身份返回�
 
 ```rust
 let pipeline = Pipeline::new(
+    // 先从账号密码开始。
     "input",
     vec![
+        // 收集账号和密码。
         Node::input("input", vec!["account".into(), "password".into()])
+            // 密码成功后继续进入 TOTP。
             .edge(None::<String>, "password"),
+        // 校验账号密码，成功时把身份传给 totp。
         Node::verify("password", "password").edge(None::<String>, "totp"),
+        // 收集用户输入的动态码。
         Node::input("totp", vec!["code".into()])
+            // 默认进入 check 节点。
             .edge(None::<String>, "check"),
+        // 读取 Factors Store 中的 Secret 并校验 TOTP。
         Node::verify("check", "totp"),
     ],
 );
@@ -564,14 +595,22 @@ bridge 不保存浏览器 Session，也不决定一个用户是否必须启用 P
 
 ```rust
 let pipeline = Pipeline::new(
+    // 密码校验是风险路由的起点。
     "password",
     vec![
+        // normal 和 risk 是 Runner 返回的命名 route。
         Node::verify("password", "password")
+            // 普通风险直接进入审计。
             .edge(Some("normal"), "audit")
+            // 高风险先进入 TOTP 节点。
             .edge(Some("risk"), "totp"),
+        // 收集高风险分支需要的动态码。
         Node::input("totp", vec!["code".into()])
+            // 默认进入 TOTP 校验。
             .edge(None::<String>, "check"),
+        // 只有 risk 路由会激活这个节点。
         Node::verify("check", "totp").edge(None::<String>, "audit"),
+        // 记录审计；一次 Run 中只记录一次。
         Node::effect("audit", "audit").once(true),
     ],
 );
@@ -583,10 +622,10 @@ let pipeline = Pipeline::new(
 
 ```rust
 Ok(Output::Pass {
-    routes: vec!["risk".into()],
-    data: serde_json::json!({"risk": "new_device"}),
-    identity: Some(Identity::new("company", "employee-42")),
-    at: now,
+    routes: vec!["risk".into()], // 选择 password 节点上的 risk 边
+    data: serde_json::json!({"risk": "new_device"}), // 传给下游节点
+    identity: Some(Identity::new("company", "employee-42")), // 建立或确认身份
+    at: now, // 结果时间
 })
 ```
 
@@ -599,6 +638,7 @@ Pipeline 不解析脚本表达式；风险判断由调用方 Runner 或风险模
 `Join::All` 要求所有激活分支完成。它表示“每一条被激活的认证路径都必须成功”：
 
 ```rust
+// join 是汇聚节点：所有已激活分支都成功后才执行 audit。
 Node::effect("join", "audit").join(Join::All)
 ```
 
@@ -609,6 +649,7 @@ Node::effect("join", "audit").join(Join::All)
 `Join::Any` 任一分支成功即可继续。它表示“密码或 Passkey 任意一种通过即可”：
 
 ```rust
+// join 是汇聚节点：任意一条已激活分支成功后即可执行 audit。
 Node::effect("join", "audit").join(Join::Any)
 ```
 
@@ -621,6 +662,8 @@ Node::effect("join", "audit").join(Join::Any)
 节点重试次数由 `retries` 控制，循环节点还必须设置 `limit`。例如下面表示最多向 Runner 重试两次，同时整个节点最多进入三次：
 
 ```rust
+// retries 控制 Runner 失败后的重试次数。
+// limit 控制这个节点在整个图中的最大进入次数。
 Node::verify("captcha", "captcha.slider")
     .retries(2)
     .limit(3)
@@ -650,10 +693,10 @@ impl Runner for CompanyPassword {
         }
 
         Ok(Output::Pass {
-            routes: Vec::new(),
-            data: serde_json::json!({"source": "company"}),
-            identity: Some(Identity::new("company", account)),
-            at: chrono::Utc::now().timestamp(),
+            routes: Vec::new(), // 不选择命名分支，沿默认边继续
+            data: serde_json::json!({"source": "company"}), // 传给下游节点
+            identity: Some(Identity::new("company", account)), // 认证成功后的身份
+            at: chrono::Utc::now().timestamp(), // 结果时间
         })
     }
 }
@@ -664,6 +707,7 @@ impl Runner for CompanyPassword {
 自定义 Runner 可以读取节点配置：
 
 ```rust
+// node.args 是发布配置中的非敏感参数。
 let mode = node.args.get("mode").and_then(Value::as_str);
 ```
 
@@ -672,6 +716,7 @@ let mode = node.args.get("mode").and_then(Value::as_str);
 如果不支持当前节点，必须返回 `Error::Unsupported`，这样 `Fallback` 才会继续调用默认 Runner：
 
 ```rust
+// 把自定义 Runner 和默认 Services 组合成一个执行器。
 let runner = Fallback::new(CompanyPassword, services);
 ```
 
@@ -692,6 +737,7 @@ impl Sender for CompanySms {
         ttl: u64,
     ) -> BoxFuture<'a> {
         Box::pin(async move {
+            // 这里替换成调用方自己的短信 API、签名和错误处理。
             println!("send {code} to {phone}, ttl={ttl}");
             Ok(())
         })
@@ -700,7 +746,7 @@ impl Sender for CompanySms {
 
 let sender = SmsSender::with(
     SmsConfig {
-        enabled: true,
+        enabled: true, // 开启发送通道
         access_key_id: "company".into(),
         access_key_secret: "company".into(),
         ..SmsConfig::default()
@@ -720,6 +766,7 @@ let sender = SmsSender::with(
 页面或 Pipeline JSON 中只保存 Secret 引用：
 
 ```rust
+// 只生成 Secret 引用，不读取也不暴露真实密钥。
 let reference = halo::bridge::secret("sms.tencent.secret");
 ```
 
@@ -730,6 +777,8 @@ let reference = halo::bridge::secret("sms.tencent.secret");
 副作用节点可以配置只执行一次：
 
 ```rust
+// once 防止同一个 Run 重复写审计。
+// idempotency 用于调用方跨进程 Effects 存储的幂等 Key。
 Node::effect("audit", "audit")
     .once(true)
     .idempotency("login-audit")
@@ -779,10 +828,15 @@ match pipeline.run(&mut run, &runner).await? {
 仓库中的示例可以直接查看完整节点组合：
 
 ```bash
+# 运行线性认证流程示例。
 cargo run --example pipeline_linear
+# 运行风险分支和 All/Any 示例。
 cargo run --example pipeline_graph
+# 运行自动执行节点的 Runner 示例。
 cargo run --example pipeline_runner
+# 运行自定义认证和 Fallback 示例。
 cargo run --example pipeline_custom
+# 运行自定义短信供应商示例。
 cargo run --example sender_custom
 ```
 
@@ -797,10 +851,15 @@ cargo run --example sender_custom
 ## 12. 验证项目
 
 ```bash
+# 检查 Rust 格式。
 cargo fmt --all -- --check
+# 检查 workspace 编译。
 cargo check --workspace
+# 执行全部测试。
 cargo test --workspace --all-targets
+# 执行严格 Clippy 检查。
 cargo clippy --all-targets --all-features -- -D warnings
+# 执行 Pipeline 基准。
 cargo bench --bench pipeline
 ```
 
