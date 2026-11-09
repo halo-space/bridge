@@ -111,23 +111,74 @@ pub trait Limits {}   // 发送和校验频控
 
 ### 第二步：创建 Cards
 
-管理端发布 Pipeline 前，用 `Cards` 注册允许页面使用的能力和参数：
+管理端发布 Pipeline 前，用 `Cards` 建立“页面可以选择哪些能力”的白名单。它只负责配置校验和页面 Schema，不会启用登录方式，也不会执行登录。
 
 ```rust
 use halo::bridge::{Cards, Op};
 
+// 创建一个空的能力表。实际项目通常在应用启动时创建一次并复用。
 let cards = Cards::new()
+    // Verify 表示“校验已经提交的材料”。
+    // 这里允许页面配置账号密码校验。
     .add(Op::Verify, "password")
+    // 允许页面配置 TOTP 校验节点。
     .add(Op::Verify, "totp")
+    // 允许页面配置短信验证码校验节点。
     .add(Op::Verify, "sms")
+    // Issue 表示“生成或签发材料”。
+    // 这里允许页面配置短信验证码签发节点。
     .add(Op::Issue, "sms")
+    // Effect 表示“产生外部副作用”。
+    // 这里允许页面配置短信发送节点。
     .add(Op::Effect, "sms.send")
+    // 给 password 能力声明一个可选的字符串参数 source。
+    // required=false：页面可以不填；secret=false：它不是密钥引用。
     .arg(Op::Verify, "password", "source", "string", false, false)
+    // 给短信签发能力声明一个可选的场景参数 scene。
     .arg(Op::Issue, "sms", "scene", "string", false, false);
 
-// 页面使用的 JSON Schema
+// 导出页面编辑器使用的 JSON Schema。
+// 页面可以根据它显示能力、参数类型和必填关系。
 let schema = cards.schema();
 ```
+
+这段代码只注册“允许配置的能力”，不会生成下面这些登录流程：
+
+```text
+账号密码 → TOTP
+手机号 → 滑块 → 短信签发 → 短信发送 → 短信校验
+```
+
+真正的登录顺序仍然保存在 `PipelineConfig.nodes` 中。例如，只有 PipelineConfig 中同时出现 `issue(sms)`、`effect(sms.send)` 和 `verify(sms)`，并且边把它们连接起来，登录时才会执行完整的短信流程。
+
+每个参数的含义是：
+
+```text
+.add(op, code)
+  op   ：节点类别，Input / Check / Issue / Verify / Effect
+  code ：能力码，例如 password、totp、sms.send
+
+.arg(op, code, name, kind, required, secret)
+  name     ：页面参数名
+  kind     ：参数类型，例如 string、integer、boolean、object
+  required ：是否必须填写
+  secret   ：是否只能保存为 {"$secret":"..."} 引用
+```
+
+例如，下面的配置会被 `Cards` 接受：
+
+```json
+{
+  "id": "issue_sms",
+  "type": "issue",
+  "code": "sms",
+  "args": {
+    "scene": "login"
+  }
+}
+```
+
+如果页面提交了未注册的 `wechat` 能力、把 `scene` 写成数字，或者使用了没有声明的参数，`config.compile_with(&cards)` 会拒绝发布。
 
 自定义能力使用 `custom.*` 命名空间：
 
