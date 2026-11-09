@@ -1,5 +1,5 @@
 use super::{SamlAssertion, SamlConfig};
-use crate::error::{IdpError, Result};
+use crate::error::{Error, Result};
 use crate::types::Identity;
 use saml::binding::{Binding, SsoResponseBinding, SsoResponseEndpoint};
 use saml::descriptor::IdpDescriptor;
@@ -20,16 +20,16 @@ pub struct SamlAuth {
 impl SamlAuth {
     pub fn new(config: &SamlConfig) -> Result<Self> {
         let idp = IdpDescriptor::from_metadata_xml(config.metadata.as_bytes())
-            .map_err(|e| IdpError::OAuthError(format!("Invalid SAML metadata: {e}")))?;
+            .map_err(|e| Error::OAuthError(format!("Invalid SAML metadata: {e}")))?;
         if idp.entity_id != config.idp_entity_id {
-            return Err(IdpError::OAuthError("SAML IdP entity mismatch".into()));
+            return Err(Error::OAuthError("SAML IdP entity mismatch".into()));
         }
         if !idp
             .sso_endpoints
             .iter()
             .any(|endpoint| endpoint.url == config.idp_sso_url)
         {
-            return Err(IdpError::OAuthError("SAML SSO endpoint mismatch".into()));
+            return Err(Error::OAuthError("SAML SSO endpoint mismatch".into()));
         }
         let sp = ServiceProvider::new(ServiceProviderConfig {
             entity_id: config.sp_entity_id.clone(),
@@ -52,7 +52,7 @@ impl SamlAuth {
             outbound_signature_algorithm: SignatureAlgorithm::RsaSha256,
             outbound_digest_algorithm: DigestAlgorithm::Sha256,
         })
-        .map_err(|e| IdpError::OAuthError(format!("Invalid SAML service provider: {e}")))?;
+        .map_err(|e| Error::OAuthError(format!("Invalid SAML service provider: {e}")))?;
         Ok(Self {
             sp,
             idp,
@@ -95,7 +95,7 @@ impl SamlAuth {
                     response_binding: Some(SsoResponseBinding::HttpPost),
                 },
             )
-            .map_err(|e| IdpError::OAuthError(format!("SAML login start rejected: {e}")))?;
+            .map_err(|e| Error::OAuthError(format!("SAML login start rejected: {e}")))?;
         Ok((started.dispatch, started.tracker))
     }
 
@@ -133,7 +133,7 @@ impl SamlAuth {
                 replay_mode: ReplayMode::All,
                 holder_of_key_cert: None,
             })
-            .map_err(|e| IdpError::OAuthError(format!("SAML response rejected: {e}")))?;
+            .map_err(|e| Error::OAuthError(format!("SAML response rejected: {e}")))?;
 
         let mut email = None;
         let mut display_name = None;

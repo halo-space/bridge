@@ -1,11 +1,13 @@
 use super::SocialProfile;
-use crate::error::{IdpError, Result};
+use crate::error::{Error, Result};
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 use url::Url;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WechatConfig {
     pub app_id: String,
+    #[serde(default, skip_serializing)]
     pub app_secret: String,
     pub scope: Option<String>,
 }
@@ -13,6 +15,7 @@ pub struct WechatConfig {
 pub struct WechatProvider {
     config: WechatConfig,
     endpoint: String,
+    timeout: Duration,
 }
 
 impl WechatProvider {
@@ -20,6 +23,7 @@ impl WechatProvider {
         Self {
             config,
             endpoint: "https://api.weixin.qq.com".into(),
+            timeout: crate::pkg::http::DEFAULT_TIMEOUT,
         }
     }
 
@@ -28,10 +32,15 @@ impl WechatProvider {
         self
     }
 
+    pub fn timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout.max(Duration::from_secs(1));
+        self
+    }
+
     /// 构造微信扫码登录跳转链接 (PC 网站应用 snsapi_login)
     pub fn get_authorize_url(&self, state: &str, redirect_uri: &str) -> Result<String> {
         let mut u = Url::parse("https://open.weixin.qq.com/connect/qrconnect")
-            .map_err(|e| IdpError::Internal(e.to_string()))?;
+            .map_err(|e| Error::Internal(e.to_string()))?;
 
         let scope = self.config.scope.as_deref().unwrap_or("snsapi_login");
         u.query_pairs_mut()
@@ -48,7 +57,7 @@ impl WechatProvider {
     pub fn parse_user_json(user_json: &serde_json::Value) -> Result<SocialProfile> {
         let openid = user_json["openid"]
             .as_str()
-            .ok_or_else(|| IdpError::OAuthError("Missing WeChat openid".into()))?
+            .ok_or_else(|| Error::OAuthError("Missing WeChat openid".into()))?
             .to_string();
 
         let unionid = user_json["unionid"].as_str().map(|s| s.to_string());
@@ -70,12 +79,12 @@ impl WechatProvider {
 
     /// 使用 authorization_code 换取 access_token 并读取微信用户资料。
     pub async fn exchange_code_for_profile(&self, code: &str) -> Result<SocialProfile> {
-        let http = reqwest::Client::new();
+        let http = crate::pkg::http::client(self.timeout)?;
         let mut token_url = Url::parse(&format!(
             "{}/sns/oauth2/access_token",
             self.endpoint.trim_end_matches('/')
         ))
-        .map_err(|e| IdpError::Internal(e.to_string()))?;
+        .map_err(|e| Error::Internal(e.to_string()))?;
         token_url
             .query_pairs_mut()
             .append_pair("appid", &self.config.app_id)
@@ -86,12 +95,14 @@ impl WechatProvider {
             .get(token_url)
             .send()
             .await
-            .map_err(|e| IdpError::OAuthError(format!("WeChat token exchange error: {e}")))?;
+            .map_err(|e| Error::OAuthError(format!("WeChat token exchange error: {e}")))?;
 
         let token_json: serde_json::Value = token_resp
+            .error_for_status()
+            .map_err(|e| Error::OAuthError(format!("WeChat token HTTP error: {e}")))?
             .json()
             .await
-            .map_err(|e| IdpError::OAuthError(format!("Invalid WeChat token JSON: {e}")))?;
+            .map_err(|e| Error::OAuthError(format!("Invalid WeChat token JSON: {e}")))?;
         if token_json
             .get("errcode")
             .and_then(|value| value.as_i64())
@@ -102,7 +113,7 @@ impl WechatProvider {
                 .get("errmsg")
                 .and_then(|value| value.as_str())
                 .unwrap_or("token exchange failed");
-            return Err(IdpError::OAuthError(format!(
+            return Err(Error::OAuthError(format!(
                 "WeChat token exchange failed: {message}"
             )));
         }
@@ -110,17 +121,17 @@ impl WechatProvider {
         let access_token = token_json
             .get("access_token")
             .and_then(|value| value.as_str())
-            .ok_or_else(|| IdpError::OAuthError("Missing WeChat access_token".into()))?;
+            .ok_or_else(|| Error::OAuthError("Missing WeChat access_token".into()))?;
         let openid = token_json
             .get("openid")
             .and_then(|value| value.as_str())
-            .ok_or_else(|| IdpError::OAuthError("Missing WeChat openid".into()))?;
+            .ok_or_else(|| Error::OAuthError("Missing WeChat openid".into()))?;
 
         let mut user_url = Url::parse(&format!(
             "{}/sns/userinfo",
             self.endpoint.trim_end_matches('/')
         ))
-        .map_err(|e| IdpError::Internal(e.to_string()))?;
+        .map_err(|e| Error::Internal(e.to_string()))?;
         user_url
             .query_pairs_mut()
             .append_pair("access_token", access_token)
@@ -130,11 +141,13 @@ impl WechatProvider {
             .get(user_url)
             .send()
             .await
-            .map_err(|e| IdpError::OAuthError(format!("WeChat userinfo error: {e}")))?;
+            .map_err(|e| Error::OAuthError(format!("WeChat userinfo error: {e}")))?;
         let user_json: serde_json::Value = user_resp
+            .error_for_status()
+            .map_err(|e| Error::OAuthError(format!("WeChat userinfo HTTP error: {e}")))?
             .json()
             .await
-            .map_err(|e| IdpError::OAuthError(format!("Invalid WeChat userinfo JSON: {e}")))?;
+            .map_err(|e| Error::OAuthError(format!("Invalid WeChat userinfo JSON: {e}")))?;
         if user_json
             .get("errcode")
             .and_then(|value| value.as_i64())
@@ -145,7 +158,7 @@ impl WechatProvider {
                 .get("errmsg")
                 .and_then(|value| value.as_str())
                 .unwrap_or("userinfo request failed");
-            return Err(IdpError::OAuthError(format!(
+            return Err(Error::OAuthError(format!(
                 "WeChat userinfo failed: {message}"
             )));
         }

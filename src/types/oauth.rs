@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OAuthClient {
     pub client_id: String,
+    #[serde(default, skip_serializing)]
     pub client_secret: Option<String>,
     pub client_name: String,
     pub redirect_uris: Vec<String>,
@@ -19,7 +20,6 @@ pub struct AuthCode {
     pub code: String,
     pub client_id: String,
     pub user_id: i64,
-    pub tenant_id: i64,
     pub redirect_uri: String,
     pub scope: String,
     pub code_challenge: Option<String>,

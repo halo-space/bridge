@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub enum IdpError {
+pub enum Error {
     #[error("Authentication failed: {0}")]
     AuthFailed(String),
 
@@ -75,4 +75,4 @@ pub enum IdpError {
     Unsupported(String),
 }
 
-pub type Result<T> = std::result::Result<T, IdpError>;
+pub type Result<T> = std::result::Result<T, Error>;

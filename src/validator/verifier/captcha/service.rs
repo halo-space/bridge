@@ -1,6 +1,6 @@
 use super::types::{CaptchaType, CaptchaVerifyReq};
 use super::{ClickCaptcha, ImageCaptcha, RotateCaptcha, SliderCaptcha, TargetPoint};
-use crate::error::{IdpError, Result};
+use crate::error::{Error, Result};
 use crate::store::Secrets;
 
 pub struct CaptchaVerifier {
@@ -26,52 +26,75 @@ impl CaptchaVerifier {
         let key = format!("cap:{}", req.id);
         let attempts_key = format!("cap:attempts:{}", req.id);
         let type_key = format!("cap:type:{}", req.id);
-        let answer = kv.get(&key).await?.ok_or(IdpError::CaptchaExpired)?;
+        let answer = kv.get(&key).await?.ok_or(Error::CaptchaExpired)?;
         let stored_type = kv
             .get(&type_key)
             .await?
             .and_then(|value| serde_json::from_str::<CaptchaType>(&value).ok())
-            .ok_or(IdpError::CaptchaExpired)?;
+            .ok_or(Error::CaptchaExpired)?;
         if stored_type != req.captcha_type {
-            return Err(IdpError::CaptchaFailed("Captcha type mismatch".into()));
+            return Err(Error::CaptchaFailed("Captcha type mismatch".into()));
         }
-        let attempts = kv
-            .get(&attempts_key)
-            .await?
-            .and_then(|v| v.parse::<u32>().ok())
-            .unwrap_or(0);
-        if attempts >= self.max_attempts {
-            return Err(IdpError::CaptchaFailed("Too many attempts".into()));
-        }
+        let attempts = match kv.incr(&attempts_key, 120).await {
+            Ok(attempts) => {
+                if attempts > self.max_attempts {
+                    return Err(Error::CaptchaFailed("Too many attempts".into()));
+                }
+                Some(attempts)
+            }
+            Err(Error::Unsupported(_)) => {
+                let attempts = kv
+                    .get(&attempts_key)
+                    .await?
+                    .and_then(|v| v.parse::<u32>().ok())
+                    .unwrap_or(0);
+                if attempts >= self.max_attempts {
+                    return Err(Error::CaptchaFailed("Too many attempts".into()));
+                }
+                None
+            }
+            Err(error) => return Err(error),
+        };
 
         let passed = match req.captcha_type {
             CaptchaType::Image => ImageCaptcha::verify(&answer, req.text.as_deref().unwrap_or("")),
             CaptchaType::Slider => {
                 let target: u32 = answer
                     .parse()
-                    .map_err(|_| IdpError::Internal("Corrupted slider challenge answer".into()))?;
+                    .map_err(|_| Error::Internal("Corrupted slider challenge answer".into()))?;
                 SliderCaptcha::verify(target, req.offset_x.unwrap_or(0))
             }
             CaptchaType::Rotate => {
                 let target: u32 = answer
                     .parse()
-                    .map_err(|_| IdpError::Internal("Corrupted rotate challenge answer".into()))?;
+                    .map_err(|_| Error::Internal("Corrupted rotate challenge answer".into()))?;
                 RotateCaptcha::verify(target, req.angle.unwrap_or(0))
             }
             CaptchaType::Click => {
                 let targets: Vec<TargetPoint> = serde_json::from_str(&answer)
-                    .map_err(|_| IdpError::Internal("Corrupted click challenge answer".into()))?;
+                    .map_err(|_| Error::Internal("Corrupted click challenge answer".into()))?;
                 ClickCaptcha::verify(&targets, req.points.as_deref().unwrap_or(&[]))
             }
         };
 
         if !passed {
-            kv.set(&attempts_key, &(attempts + 1).to_string(), 120)
-                .await?;
-            return Err(IdpError::CaptchaFailed("Verification failed".into()));
+            if let Some(attempts) = attempts {
+                if attempts >= self.max_attempts {
+                    return Err(Error::CaptchaFailed("Too many attempts".into()));
+                }
+            } else {
+                let current = kv
+                    .get(&attempts_key)
+                    .await?
+                    .and_then(|v| v.parse::<u32>().ok())
+                    .unwrap_or(0);
+                kv.set(&attempts_key, &(current + 1).to_string(), 120)
+                    .await?;
+            }
+            return Err(Error::CaptchaFailed("Verification failed".into()));
         }
         if !kv.take_if(&key, &answer).await? {
-            return Err(IdpError::CaptchaExpired);
+            return Err(Error::CaptchaExpired);
         }
         kv.del(&attempts_key).await?;
         kv.del(&type_key).await?;

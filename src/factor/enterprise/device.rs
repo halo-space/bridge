@@ -1,23 +1,12 @@
-use crate::error::{IdpError, Result};
+pub use crate::types::Device;
+
+use crate::error::{Error, Result};
 use crate::store::Secrets;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use rsa::{RsaPublicKey, pkcs1v15::Pkcs1v15Sign, pkcs8::DecodePublicKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-
-/// 企业设备登录因子。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Device {
-    pub id: String,
-    pub tenant_id: i64,
-    pub subject: String,
-    pub name: String,
-    pub public_key: String,
-    pub enabled: bool,
-    pub created_at: i64,
-    pub last_used_at: Option<i64>,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceProof {
@@ -30,7 +19,6 @@ pub struct DeviceProof {
 impl Device {
     pub fn new(
         id: impl Into<String>,
-        tenant_id: i64,
         subject: impl Into<String>,
         name: impl Into<String>,
         public_key: impl Into<String>,
@@ -38,7 +26,6 @@ impl Device {
     ) -> Self {
         Self {
             id: id.into(),
-            tenant_id,
             subject: subject.into(),
             name: name.into(),
             public_key: public_key.into(),
@@ -71,24 +58,24 @@ impl Device {
     /// 校验设备对一次性 nonce 的 RSA-SHA256 签名。
     pub fn verify(&self, proof: &DeviceProof, now: i64, window: i64) -> Result<()> {
         if !self.enabled {
-            return Err(IdpError::AuthFailed("Device is disabled".into()));
+            return Err(Error::AuthFailed("Device is disabled".into()));
         }
         if proof.device_id != self.id {
-            return Err(IdpError::AuthFailed("Device mismatch".into()));
+            return Err(Error::AuthFailed("Device mismatch".into()));
         }
         if window < 0 || (now - proof.at).abs() > window {
-            return Err(IdpError::AuthFailed("Device proof expired".into()));
+            return Err(Error::AuthFailed("Device proof expired".into()));
         }
         let public_key = RsaPublicKey::from_public_key_pem(&self.public_key)
-            .map_err(|e| IdpError::AuthFailed(format!("Invalid device public key: {e}")))?;
+            .map_err(|e| Error::AuthFailed(format!("Invalid device public key: {e}")))?;
         let signature = URL_SAFE_NO_PAD
             .decode(proof.signature.trim())
-            .map_err(|e| IdpError::AuthFailed(format!("Invalid device signature: {e}")))?;
+            .map_err(|e| Error::AuthFailed(format!("Invalid device signature: {e}")))?;
         let message = format!("{}:{}:{}", self.id, proof.nonce, proof.at);
         let digest = Sha256::digest(message.as_bytes());
         public_key
             .verify(Pkcs1v15Sign::new::<Sha256>(), &digest, &signature)
-            .map_err(|_| IdpError::AuthFailed("Invalid device proof".into()))
+            .map_err(|_| Error::AuthFailed("Invalid device proof".into()))
     }
 }
 
@@ -134,7 +121,7 @@ mod tests {
         let public = RsaPublicKey::from(&private)
             .to_public_key_pem(rsa::pkcs8::LineEnding::LF)
             .unwrap();
-        let device = Device::new("d1", 1, "u1", "laptop", public, 100);
+        let device = Device::new("d1", "u1", "laptop", public, 100);
         let message = "d1:nonce:100";
         let digest = Sha256::digest(message.as_bytes());
         let signature = private
@@ -152,7 +139,7 @@ mod tests {
 
     #[tokio::test]
     async fn issues_a_single_use_nonce() {
-        let device = Device::new("d1", 1, "u1", "laptop", "unused", 100);
+        let device = Device::new("d1", "u1", "laptop", "unused", 100);
         let store = Mem::default();
         let nonce = device.issue_nonce(&store, 60).await.unwrap();
         assert!(

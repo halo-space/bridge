@@ -1,7 +1,7 @@
 use super::claims::Claims;
-use crate::error::{IdpError, Result};
+use crate::error::{Error, Result};
 use crate::store::Secrets;
-use crate::types::AuthUser;
+use crate::types::User;
 use chrono::Utc;
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
 
@@ -50,21 +50,18 @@ impl TokenService {
     }
 
     /// 为认证通过的用户签发标准 Access Token 与 Refresh Token (自动匹配 HS256 或 RS256)
-    pub fn issue_tokens(
-        &self,
-        user: &AuthUser,
-        audience: Option<String>,
-    ) -> Result<(String, String)> {
+    pub fn issue_tokens(&self, user: &User, audience: Option<String>) -> Result<(String, String)> {
         self.issue_tokens_with_claims(user, audience, None)
     }
 
     /// 签发携带自定义扩展 Claims 字段的 Tokens (支持工号、部门等动态 Claims)
     pub fn issue_tokens_with_claims(
         &self,
-        user: &AuthUser,
+        user: &User,
         audience: Option<String>,
         custom_claims: Option<serde_json::Map<String, serde_json::Value>>,
     ) -> Result<(String, String)> {
+        self.validate_config()?;
         let now = Utc::now().timestamp();
 
         // 1. Access Token（携带身份载荷和自定义扩展字段）
@@ -77,7 +74,6 @@ impl TokenService {
             iat: now,
             nbf: now,
             jti: uuid::Uuid::new_v4().to_string(),
-            tenant_id: user.tenant_id,
             username: user.username.clone(),
             custom: custom_claims.unwrap_or_default(),
         };
@@ -92,29 +88,28 @@ impl TokenService {
             iat: now,
             nbf: now,
             jti: uuid::Uuid::new_v4().to_string(),
-            tenant_id: user.tenant_id,
             username: user.username.clone(),
             custom: serde_json::Map::new(),
         };
 
         let (access_token, refresh_token) = if let Some(ref priv_pem) = self.rsa_private_pem {
             let key = EncodingKey::from_rsa_pem(priv_pem.as_bytes())
-                .map_err(|e| IdpError::TokenError(format!("Invalid RSA private key: {e}")))?;
+                .map_err(|e| Error::TokenError(format!("Invalid RSA private key: {e}")))?;
             let header = Header::new(Algorithm::RS256);
 
             let at = encode(&header, &access_claims, &key)
-                .map_err(|e| IdpError::TokenError(e.to_string()))?;
+                .map_err(|e| Error::TokenError(e.to_string()))?;
             let rt = encode(&header, &refresh_claims, &key)
-                .map_err(|e| IdpError::TokenError(e.to_string()))?;
+                .map_err(|e| Error::TokenError(e.to_string()))?;
             (at, rt)
         } else {
             let key = EncodingKey::from_secret(self.secret.as_bytes());
             let header = Header::default();
 
             let at = encode(&header, &access_claims, &key)
-                .map_err(|e| IdpError::TokenError(e.to_string()))?;
+                .map_err(|e| Error::TokenError(e.to_string()))?;
             let rt = encode(&header, &refresh_claims, &key)
-                .map_err(|e| IdpError::TokenError(e.to_string()))?;
+                .map_err(|e| Error::TokenError(e.to_string()))?;
             (at, rt)
         };
 
@@ -125,7 +120,7 @@ impl TokenService {
     pub fn verify_token(&self, token: &str) -> Result<Claims> {
         let claims = self.verify(token)?;
         if claims.kind != "access" {
-            return Err(IdpError::TokenError("Expected access token".into()));
+            return Err(Error::TokenError("Expected access token".into()));
         }
         Ok(claims)
     }
@@ -133,17 +128,18 @@ impl TokenService {
     pub fn verify_refresh(&self, token: &str) -> Result<Claims> {
         let claims = self.verify(token)?;
         if claims.kind != "refresh" {
-            return Err(IdpError::TokenError("Expected refresh token".into()));
+            return Err(Error::TokenError("Expected refresh token".into()));
         }
         Ok(claims)
     }
 
     pub fn issue_id_token(
         &self,
-        user: &AuthUser,
+        user: &User,
         audience: String,
         nonce: Option<String>,
     ) -> Result<String> {
+        self.validate_config()?;
         let now = Utc::now().timestamp();
         let mut custom = serde_json::Map::new();
         if let Some(nonce) = nonce {
@@ -158,34 +154,33 @@ impl TokenService {
             iat: now,
             nbf: now,
             jti: uuid::Uuid::new_v4().to_string(),
-            tenant_id: user.tenant_id,
             username: user.username.clone(),
             custom,
         };
         if let Some(ref private) = self.rsa_private_pem {
             let key = EncodingKey::from_rsa_pem(private.as_bytes())
-                .map_err(|e| IdpError::TokenError(format!("Invalid RSA private key: {e}")))?;
+                .map_err(|e| Error::TokenError(format!("Invalid RSA private key: {e}")))?;
             encode(&Header::new(Algorithm::RS256), &claims, &key)
-                .map_err(|e| IdpError::TokenError(e.to_string()))
+                .map_err(|e| Error::TokenError(e.to_string()))
         } else {
             encode(
                 &Header::default(),
                 &claims,
                 &EncodingKey::from_secret(self.secret.as_bytes()),
             )
-            .map_err(|e| IdpError::TokenError(e.to_string()))
+            .map_err(|e| Error::TokenError(e.to_string()))
         }
     }
 
     pub fn verify_id(&self, token: &str, audience: &str, nonce: Option<&str>) -> Result<Claims> {
         let claims = self.verify(token)?;
         if claims.kind != "id" || claims.aud.as_deref() != Some(audience) {
-            return Err(IdpError::TokenError("Invalid ID token".into()));
+            return Err(Error::TokenError("Invalid ID token".into()));
         }
         if let Some(expected) = nonce {
             let actual = claims.custom.get("nonce").and_then(|v| v.as_str());
             if actual != Some(expected) {
-                return Err(IdpError::TokenError("Invalid ID token nonce".into()));
+                return Err(Error::TokenError("Invalid ID token nonce".into()));
             }
         }
         Ok(claims)
@@ -194,19 +189,18 @@ impl TokenService {
     pub async fn verify_live<K: Secrets>(&self, kv: &K, token: &str) -> Result<Claims> {
         let claims = self.verify_token(token)?;
         if kv.get(&format!("token:revoked:{token}")).await?.is_some() {
-            return Err(IdpError::TokenError("Token revoked".into()));
+            return Err(Error::TokenError("Token revoked".into()));
         }
         Ok(claims)
     }
 
     pub fn renew(&self, token: &str) -> Result<(String, String)> {
         let claims = self.verify_refresh(token)?;
-        let user = AuthUser {
+        let user = User {
             id: claims
                 .sub
                 .parse()
-                .map_err(|_| IdpError::TokenError("Invalid subject".into()))?,
-            tenant_id: claims.tenant_id,
+                .map_err(|_| Error::TokenError("Invalid subject".into()))?,
             username: claims.username,
             email: None,
             phone: None,
@@ -218,6 +212,7 @@ impl TokenService {
     }
 
     fn verify(&self, token: &str) -> Result<Claims> {
+        self.validate_config()?;
         let alg = if self.rsa_public_pem.is_some() {
             Algorithm::RS256
         } else {
@@ -231,19 +226,20 @@ impl TokenService {
 
         let token_data = if let Some(ref pub_pem) = self.rsa_public_pem {
             let key = DecodingKey::from_rsa_pem(pub_pem.as_bytes())
-                .map_err(|e| IdpError::TokenError(format!("Invalid RSA public key: {e}")))?;
+                .map_err(|e| Error::TokenError(format!("Invalid RSA public key: {e}")))?;
             decode::<Claims>(token, &key, &validation)
         } else {
             let key = DecodingKey::from_secret(self.secret.as_bytes());
             decode::<Claims>(token, &key, &validation)
         }
-        .map_err(|e| IdpError::TokenError(e.to_string()))?;
+        .map_err(|e| Error::TokenError(e.to_string()))?;
 
         Ok(token_data.claims)
     }
 
     /// 校验并解析 Access Token 并精确验证 Audience
     pub fn verify_token_with_audience(&self, token: &str, audience: &str) -> Result<Claims> {
+        self.validate_config()?;
         let alg = if self.rsa_public_pem.is_some() {
             Algorithm::RS256
         } else {
@@ -257,17 +253,36 @@ impl TokenService {
 
         let token_data = if let Some(ref pub_pem) = self.rsa_public_pem {
             let key = DecodingKey::from_rsa_pem(pub_pem.as_bytes())
-                .map_err(|e| IdpError::TokenError(format!("Invalid RSA public key: {e}")))?;
+                .map_err(|e| Error::TokenError(format!("Invalid RSA public key: {e}")))?;
             decode::<Claims>(token, &key, &validation)
         } else {
             let key = DecodingKey::from_secret(self.secret.as_bytes());
             decode::<Claims>(token, &key, &validation)
         }
-        .map_err(|e| IdpError::TokenError(e.to_string()))?;
+        .map_err(|e| Error::TokenError(e.to_string()))?;
 
         if token_data.claims.kind != "access" {
-            return Err(IdpError::TokenError("Expected access token".into()));
+            return Err(Error::TokenError("Expected access token".into()));
         }
         Ok(token_data.claims)
+    }
+
+    fn validate_config(&self) -> Result<()> {
+        if self.issuer.trim().is_empty() {
+            return Err(Error::TokenError("Token issuer cannot be empty".into()));
+        }
+        if self.access_token_ttl <= 0 || self.refresh_token_ttl <= 0 {
+            return Err(Error::TokenError("Token TTL must be positive".into()));
+        }
+        match (&self.rsa_private_pem, &self.rsa_public_pem) {
+            (Some(_), Some(_)) => Ok(()),
+            (Some(_), None) | (None, Some(_)) => Err(Error::TokenError(
+                "RSA private and public keys must be provided together".into(),
+            )),
+            (None, None) if self.secret.trim().len() < 32 => Err(Error::TokenError(
+                "HS256 secret must contain at least 32 characters".into(),
+            )),
+            (None, None) => Ok(()),
+        }
     }
 }

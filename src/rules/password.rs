@@ -1,4 +1,4 @@
-use crate::error::{IdpError, Result};
+use crate::error::{Error, Result};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -52,13 +52,13 @@ impl Policy {
     pub fn validate(&self, password: &str, username: Option<&str>) -> Result<()> {
         let len = password.chars().count();
         if len < self.min_length {
-            return Err(IdpError::AuthFailed(format!(
+            return Err(Error::AuthFailed(format!(
                 "Password must be at least {} characters long",
                 self.min_length
             )));
         }
         if len > self.max_length {
-            return Err(IdpError::AuthFailed(format!(
+            return Err(Error::AuthFailed(format!(
                 "Password cannot exceed {} characters",
                 self.max_length
             )));
@@ -70,20 +70,20 @@ impl Policy {
             .iter()
             .any(|w| w.eq_ignore_ascii_case(password))
         {
-            return Err(IdpError::AuthFailed(
+            return Err(Error::AuthFailed(
                 "Password is too common and unsafe".into(),
             ));
         }
 
         // 禁止包含账号名
-        if self.disallow_username {
-            if let Some(uname) = username {
-                if !uname.is_empty() && password.to_lowercase().contains(&uname.to_lowercase()) {
-                    return Err(IdpError::AuthFailed(
-                        "Password cannot contain your username".into(),
-                    ));
-                }
-            }
+        if self.disallow_username
+            && let Some(uname) = username
+            && !uname.is_empty()
+            && password.to_lowercase().contains(&uname.to_lowercase())
+        {
+            return Err(Error::AuthFailed(
+                "Password cannot contain your username".into(),
+            ));
         }
 
         let mut has_upper = false;
@@ -104,22 +104,22 @@ impl Policy {
         }
 
         if self.require_uppercase && !has_upper {
-            return Err(IdpError::AuthFailed(
+            return Err(Error::AuthFailed(
                 "Password must contain at least one uppercase letter".into(),
             ));
         }
         if self.require_lowercase && !has_lower {
-            return Err(IdpError::AuthFailed(
+            return Err(Error::AuthFailed(
                 "Password must contain at least one lowercase letter".into(),
             ));
         }
         if self.require_digit && !has_digit {
-            return Err(IdpError::AuthFailed(
+            return Err(Error::AuthFailed(
                 "Password must contain at least one number".into(),
             ));
         }
         if self.require_special_char && !has_special {
-            return Err(IdpError::AuthFailed(
+            return Err(Error::AuthFailed(
                 "Password must contain at least one special character".into(),
             ));
         }

@@ -11,7 +11,6 @@ pub struct Claims {
     pub iat: i64,
     pub nbf: i64,
     pub jti: String,
-    pub tenant_id: i64,
     pub username: String,
     /// 自定义扩展声明 (对齐 Authing 3.18 IdToken 扩展字段)
     #[serde(default, flatten)]

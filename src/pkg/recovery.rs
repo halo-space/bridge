@@ -1,4 +1,4 @@
-use crate::error::{IdpError, Result};
+use crate::error::{Error, Result};
 use rand_core::{OsRng, RngCore};
 use sha2::{Digest, Sha256};
 
@@ -38,7 +38,7 @@ impl RecoveryCode {
         if let Some(matched) = stored_hashes.iter().find(|&h| h == &input_hash) {
             Ok(matched.clone())
         } else {
-            Err(IdpError::AuthFailed("Invalid recovery code".into()))
+            Err(Error::AuthFailed("Invalid recovery code".into()))
         }
     }
 }

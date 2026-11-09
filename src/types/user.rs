@@ -1,21 +1,23 @@
 use crate::types::Identity;
 use serde::{Deserialize, Serialize};
 
-/// 认证通过后的标准用户载荷。
+/// 调用方提供的账号凭证记录。
+///
+/// bridge 不保存此记录；`Users` 只负责在认证时读取它，业务范围和持久化由调用方决定。
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AuthUser {
+pub struct User {
     pub id: i64,
-    pub tenant_id: i64,
     pub username: String,
     pub email: Option<String>,
     pub phone: Option<String>,
+    #[serde(default, skip_serializing)]
     pub password_hash: Option<String>,
     #[serde(default)]
     pub password_algorithm: Option<u16>,
     pub is_active: bool,
 }
 
-impl AuthUser {
+impl User {
     pub fn identity(&self) -> Identity {
         let mut identity = Identity::new("local", self.id.to_string()).name(&self.username);
         if let Some(email) = &self.email {

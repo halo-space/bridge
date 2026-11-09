@@ -18,64 +18,75 @@ pub struct WebAuthn {
 impl WebAuthn {
     pub fn new(rp_id: &str, origin: &str, name: &str) -> Result<Self> {
         let origin =
-            Url::parse(origin).map_err(|e| crate::error::IdpError::WebAuthnError(e.to_string()))?;
+            Url::parse(origin).map_err(|e| crate::error::Error::WebAuthnError(e.to_string()))?;
         let mut builder = WebauthnBuilder::new(rp_id, &origin)
-            .map_err(|e| crate::error::IdpError::WebAuthnError(e.to_string()))?;
+            .map_err(|e| crate::error::Error::WebAuthnError(e.to_string()))?;
         builder = builder.rp_name(name);
         let webauthn = builder
             .build()
-            .map_err(|e| crate::error::IdpError::WebAuthnError(e.to_string()))?;
+            .map_err(|e| crate::error::Error::WebAuthnError(e.to_string()))?;
         Ok(Self { webauthn })
     }
 
     pub fn issue(&self, user_id: &str, name: &str, display_name: &str) -> Result<Start> {
-        let user_id = Uuid::parse_str(user_id)
-            .map_err(|e| crate::error::IdpError::WebAuthnError(format!("Invalid user id: {e}")))?;
+        if user_id.trim().is_empty() {
+            return Err(crate::error::Error::WebAuthnError(
+                "User subject cannot be empty".into(),
+            ));
+        }
+        // webauthn-rs requires a UUID user handle. Keep the caller's opaque
+        // subject in the registration state and use a random handle for the
+        // protocol-level value.
+        let user_handle = Uuid::new_v4();
         let (options, state) = self
             .webauthn
-            .start_passkey_registration(user_id, name, display_name, None)
-            .map_err(|e| crate::error::IdpError::WebAuthnError(e.to_string()))?;
+            .start_passkey_registration(user_handle, name, display_name, None)
+            .map_err(|e| crate::error::Error::WebAuthnError(e.to_string()))?;
         let state = RegisterState {
             state,
-            user_handle: user_id.to_string(),
+            subject: user_id.to_string(),
+            user_handle: user_handle.to_string(),
             display_name: display_name.to_string(),
         };
         Ok(Start {
             options: serde_json::to_value(options)
-                .map_err(|e| crate::error::IdpError::Internal(e.to_string()))?,
+                .map_err(|e| crate::error::Error::Internal(e.to_string()))?,
             state: serde_json::to_string(&state)
-                .map_err(|e| crate::error::IdpError::Internal(e.to_string()))?,
+                .map_err(|e| crate::error::Error::Internal(e.to_string()))?,
         })
     }
 
     pub fn register(&self, input: &str, state: &str) -> Result<StoredPasskey> {
         let input: RegisterPublicKeyCredential = serde_json::from_str(input)
-            .map_err(|e| crate::error::IdpError::WebAuthnError(e.to_string()))?;
-        let (state, user_handle, display_name) = match serde_json::from_str::<RegisterState>(state)
-        {
-            Ok(state) => (
-                state.state,
-                Some(state.user_handle),
-                Some(state.display_name),
-            ),
-            Err(_) => (
-                serde_json::from_str::<PasskeyRegistration>(state)
-                    .map_err(|e| crate::error::IdpError::WebAuthnError(e.to_string()))?,
-                None,
-                None,
-            ),
-        };
+            .map_err(|e| crate::error::Error::WebAuthnError(e.to_string()))?;
+        let (state, subject, user_handle, display_name) =
+            match serde_json::from_str::<RegisterState>(state) {
+                Ok(state) => (
+                    state.state,
+                    Some(state.subject),
+                    Some(state.user_handle),
+                    Some(state.display_name),
+                ),
+                Err(_) => (
+                    serde_json::from_str::<PasskeyRegistration>(state)
+                        .map_err(|e| crate::error::Error::WebAuthnError(e.to_string()))?,
+                    None,
+                    None,
+                    None,
+                ),
+            };
         let passkey = self
             .webauthn
             .finish_passkey_registration(&input, &state)
-            .map_err(|e| crate::error::IdpError::WebAuthnError(e.to_string()))?;
+            .map_err(|e| crate::error::Error::WebAuthnError(e.to_string()))?;
         let data = serde_json::to_string(&passkey)
-            .map_err(|e| crate::error::IdpError::Internal(e.to_string()))?;
+            .map_err(|e| crate::error::Error::Internal(e.to_string()))?;
         let info: NativeInfo = serde_json::from_str(&data)
-            .map_err(|e| crate::error::IdpError::Internal(e.to_string()))?;
+            .map_err(|e| crate::error::Error::Internal(e.to_string()))?;
         let public_key = serde_json::to_string(passkey.get_public_key())
-            .map_err(|e| crate::error::IdpError::Internal(e.to_string()))?;
+            .map_err(|e| crate::error::Error::Internal(e.to_string()))?;
         Ok(StoredPasskey {
+            subject: subject.unwrap_or_default(),
             credential_id: base64::engine::general_purpose::URL_SAFE_NO_PAD
                 .encode(passkey.cred_id()),
             public_key,
@@ -99,39 +110,39 @@ impl WebAuthn {
             .iter()
             .map(|passkey| {
                 let data = passkey.data.as_deref().ok_or_else(|| {
-                    crate::error::IdpError::WebAuthnError("Missing Passkey data".into())
+                    crate::error::Error::WebAuthnError("Missing Passkey data".into())
                 })?;
                 serde_json::from_str(data)
-                    .map_err(|e| crate::error::IdpError::WebAuthnError(e.to_string()))
+                    .map_err(|e| crate::error::Error::WebAuthnError(e.to_string()))
             })
             .collect::<Result<Vec<_>>>()?;
         let (options, state) = self
             .webauthn
             .start_passkey_authentication(&passkeys)
-            .map_err(|e| crate::error::IdpError::WebAuthnError(e.to_string()))?;
+            .map_err(|e| crate::error::Error::WebAuthnError(e.to_string()))?;
         Ok(Start {
             options: serde_json::to_value(options)
-                .map_err(|e| crate::error::IdpError::Internal(e.to_string()))?,
+                .map_err(|e| crate::error::Error::Internal(e.to_string()))?,
             state: serde_json::to_string(&AuthState { state, passkeys })
-                .map_err(|e| crate::error::IdpError::Internal(e.to_string()))?,
+                .map_err(|e| crate::error::Error::Internal(e.to_string()))?,
         })
     }
 
     pub fn verify(&self, input: &str, state: &str) -> Result<Auth> {
         let input: PublicKeyCredential = serde_json::from_str(input)
-            .map_err(|e| crate::error::IdpError::WebAuthnError(e.to_string()))?;
+            .map_err(|e| crate::error::Error::WebAuthnError(e.to_string()))?;
         let (state, passkeys) = match serde_json::from_str::<AuthState>(state) {
             Ok(state) => (state.state, Some(state.passkeys)),
             Err(_) => (
                 serde_json::from_str::<PasskeyAuthentication>(state)
-                    .map_err(|e| crate::error::IdpError::WebAuthnError(e.to_string()))?,
+                    .map_err(|e| crate::error::Error::WebAuthnError(e.to_string()))?,
                 None,
             ),
         };
         let result = self
             .webauthn
             .finish_passkey_authentication(&input, &state)
-            .map_err(|e| crate::error::IdpError::WebAuthnError(e.to_string()))?;
+            .map_err(|e| crate::error::Error::WebAuthnError(e.to_string()))?;
         let data = passkeys
             .and_then(|passkeys| {
                 passkeys
@@ -141,7 +152,7 @@ impl WebAuthn {
             .map(|mut passkey| {
                 passkey.update_credential(&result);
                 serde_json::to_string(&passkey)
-                    .map_err(|e| crate::error::IdpError::Internal(e.to_string()))
+                    .map_err(|e| crate::error::Error::Internal(e.to_string()))
             })
             .transpose()?;
         Ok(Auth {
@@ -161,6 +172,7 @@ impl WebAuthn {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct RegisterState {
     state: PasskeyRegistration,
+    subject: String,
     user_handle: String,
     display_name: String,
 }

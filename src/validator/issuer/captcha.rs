@@ -1,4 +1,4 @@
-use crate::error::{IdpError, Result};
+use crate::error::{Error, Result};
 use crate::store::Secrets;
 use crate::validator::verifier::captcha::{
     CaptchaChallenge, CaptchaType, ClickCaptcha, ImageCaptcha, RotateCaptcha, SliderCaptcha,
@@ -31,7 +31,7 @@ impl CaptchaIssuer {
             .await?;
         kv.set(
             &format!("cap:type:{id}"),
-            &serde_json::to_string(&captcha_type).map_err(|e| IdpError::Internal(e.to_string()))?,
+            &serde_json::to_string(&captcha_type).map_err(|e| Error::Internal(e.to_string()))?,
             self.ttl_seconds,
         )
         .await?;
@@ -74,8 +74,8 @@ impl CaptchaIssuer {
             }
             CaptchaType::Click => {
                 let (points, prompt, background) = ClickCaptcha::generate();
-                let answer = serde_json::to_string(&points)
-                    .map_err(|e| IdpError::Internal(e.to_string()))?;
+                let answer =
+                    serde_json::to_string(&points).map_err(|e| Error::Internal(e.to_string()))?;
                 kv.set(&key, &answer, self.ttl_seconds).await?;
                 CaptchaChallenge {
                     id,

@@ -57,8 +57,6 @@ pub struct AuditEvent {
     /// 外部请求 ID
     #[serde(default)]
     pub request_id: Option<String>,
-    /// 租户 ID
-    pub tenant_id: i64,
     /// 事件类型
     pub event_type: AuditEventType,
     /// 关联用户 ID (若已知)
@@ -82,7 +80,6 @@ pub struct AuditEvent {
 impl AuditEvent {
     /// 构造新的安全审计事件
     pub fn new(
-        tenant_id: i64,
         event_type: AuditEventType,
         client_ip: impl Into<String>,
         outcome: AuditOutcome,
@@ -91,7 +88,6 @@ impl AuditEvent {
             id: Uuid::new_v4().to_string(),
             trace_id: None,
             request_id: None,
-            tenant_id,
             event_type,
             user_id: None,
             username: None,
@@ -143,7 +139,6 @@ mod tests {
     #[test]
     fn test_audit_event_builder() {
         let event = AuditEvent::new(
-            1,
             AuditEventType::AuthSuccess,
             "127.0.0.1",
             AuditOutcome::Success,
@@ -154,7 +149,6 @@ mod tests {
         .with_request("request-1")
         .with_metadata(serde_json::json!({ "auth_method": "webauthn" }));
 
-        assert_eq!(event.tenant_id, 1);
         assert_eq!(event.event_type, AuditEventType::AuthSuccess);
         assert_eq!(event.outcome, AuditOutcome::Success);
         assert_eq!(event.username.as_deref(), Some("admin"));

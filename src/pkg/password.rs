@@ -9,9 +9,11 @@ use pbkdf2::pbkdf2_hmac;
 use rand_core::{OsRng, RngCore};
 use sha2::Sha256;
 use sm3::Sm3 as Sm3Hash;
+use std::collections::BTreeMap;
+use std::sync::Arc;
 
-use crate::error::{IdpError, Result};
-use crate::types::AuthUser;
+use crate::error::{Error, Result};
+use crate::types::User;
 
 /// 密码存储算法。算法标识由应用层随凭证保存，便于逐步升级历史密码。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,6 +54,62 @@ pub trait Codec: Send + Sync {
     fn verify(&self, password: &str, encoded: &str) -> Result<bool>;
 }
 
+/// 可扩展密码算法集合。
+///
+/// 集合默认注册内置算法；应用可以注册自己的 `Custom(code)`，认证因子
+/// 通过 `Password::verify_user_with` 使用同一集合完成校验。
+#[derive(Clone)]
+pub struct Codecs {
+    values: BTreeMap<u16, Arc<dyn Codec>>,
+}
+
+impl Codecs {
+    pub fn new() -> Self {
+        let mut values: BTreeMap<u16, Arc<dyn Codec>> = BTreeMap::new();
+        values.insert(Algorithm::Argon2id.code(), Arc::new(Argon2id));
+        values.insert(Algorithm::Bcrypt.code(), Arc::new(Bcrypt));
+        values.insert(Algorithm::Pbkdf2.code(), Arc::new(Pbkdf2));
+        values.insert(Algorithm::Sm3.code(), Arc::new(Sm3));
+        Self { values }
+    }
+
+    pub fn with<C: Codec + 'static>(mut self, codec: C) -> Self {
+        self.values
+            .insert(codec.algorithm().code(), Arc::new(codec));
+        self
+    }
+
+    pub fn register<C: Codec + 'static>(&mut self, codec: C) {
+        self.values
+            .insert(codec.algorithm().code(), Arc::new(codec));
+    }
+
+    pub fn verify(&self, password: &str, encoded: &str, algorithm: Algorithm) -> Result<bool> {
+        let codec = self.values.get(&algorithm.code()).ok_or_else(|| {
+            Error::AuthFailed(format!(
+                "Unsupported password algorithm: {}",
+                algorithm.code()
+            ))
+        })?;
+        codec.verify(password, encoded)
+    }
+}
+
+impl Default for Codecs {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl std::fmt::Debug for Codecs {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("Codecs")
+            .field("codes", &self.values.keys())
+            .finish()
+    }
+}
+
 /// 当前内置 Argon2id；Bcrypt、SM3、PBKDF2 可按同一接口接入。
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Argon2id;
@@ -66,12 +124,12 @@ impl Codec for Argon2id {
         Argon2::default()
             .hash_password(password.as_bytes(), &salt)
             .map(|hash| hash.to_string())
-            .map_err(|err| IdpError::Internal(format!("Failed to hash password: {err}")))
+            .map_err(|err| Error::Internal(format!("Failed to hash password: {err}")))
     }
 
     fn verify(&self, password: &str, encoded: &str) -> Result<bool> {
         let hash = PasswordHash::new(encoded)
-            .map_err(|err| IdpError::AuthFailed(format!("Invalid password hash: {err}")))?;
+            .map_err(|err| Error::AuthFailed(format!("Invalid password hash: {err}")))?;
         Ok(Argon2::default()
             .verify_password(password.as_bytes(), &hash)
             .is_ok())
@@ -88,12 +146,12 @@ impl Codec for Bcrypt {
 
     fn hash(&self, password: &str) -> Result<String> {
         bcrypt_hash(password, DEFAULT_COST)
-            .map_err(|err| IdpError::Internal(format!("Failed to hash password: {err}")))
+            .map_err(|err| Error::Internal(format!("Failed to hash password: {err}")))
     }
 
     fn verify(&self, password: &str, encoded: &str) -> Result<bool> {
         bcrypt_verify(password, encoded)
-            .map_err(|err| IdpError::AuthFailed(format!("Invalid password hash: {err}")))
+            .map_err(|err| Error::AuthFailed(format!("Invalid password hash: {err}")))
     }
 }
 
@@ -122,18 +180,18 @@ impl Codec for Pbkdf2 {
     fn verify(&self, password: &str, encoded: &str) -> Result<bool> {
         let parts: Vec<&str> = encoded.split('$').collect();
         if parts.len() != 5 || parts[1] != "pbkdf2-sha256" {
-            return Err(IdpError::AuthFailed("Invalid PBKDF2 password hash".into()));
+            return Err(Error::AuthFailed("Invalid PBKDF2 password hash".into()));
         }
         let rounds: u32 = parts[2]
             .parse()
-            .map_err(|_| IdpError::AuthFailed("Invalid PBKDF2 rounds".into()))?;
+            .map_err(|_| Error::AuthFailed("Invalid PBKDF2 rounds".into()))?;
         let enc = base64::engine::general_purpose::URL_SAFE_NO_PAD;
         let salt = enc
             .decode(parts[3])
-            .map_err(|_| IdpError::AuthFailed("Invalid PBKDF2 salt".into()))?;
+            .map_err(|_| Error::AuthFailed("Invalid PBKDF2 salt".into()))?;
         let expected = enc
             .decode(parts[4])
-            .map_err(|_| IdpError::AuthFailed("Invalid PBKDF2 hash".into()))?;
+            .map_err(|_| Error::AuthFailed("Invalid PBKDF2 hash".into()))?;
         let mut actual = vec![0u8; expected.len()];
         pbkdf2_hmac::<Sha256>(password.as_bytes(), &salt, rounds, &mut actual);
         Ok(actual == expected)
@@ -162,12 +220,12 @@ impl Codec for Sm3 {
     fn verify(&self, password: &str, encoded: &str) -> Result<bool> {
         let parts: Vec<&str> = encoded.split('$').collect();
         if parts.len() != 4 || parts[1] != "sm3" {
-            return Err(IdpError::AuthFailed("Invalid SM3 password hash".into()));
+            return Err(Error::AuthFailed("Invalid SM3 password hash".into()));
         }
         let enc = base64::engine::general_purpose::URL_SAFE_NO_PAD;
         let salt = enc
             .decode(parts[2])
-            .map_err(|_| IdpError::AuthFailed("Invalid SM3 salt".into()))?;
+            .map_err(|_| Error::AuthFailed("Invalid SM3 salt".into()))?;
         let mut hash = Sm3Hash::new();
         hash.update(&salt);
         hash.update(password.as_bytes());
@@ -196,7 +254,7 @@ impl Password {
             Algorithm::Bcrypt => Bcrypt.hash(password),
             Algorithm::Pbkdf2 => Pbkdf2.hash(password),
             Algorithm::Sm3 => Sm3.hash(password),
-            other => Err(IdpError::Internal(format!(
+            other => Err(Error::Internal(format!(
                 "Password algorithm {} is not registered",
                 other.code()
             ))),
@@ -209,24 +267,73 @@ impl Password {
             Algorithm::Bcrypt => Bcrypt.verify(password, encoded),
             Algorithm::Pbkdf2 => Pbkdf2.verify(password, encoded),
             Algorithm::Sm3 => Sm3.verify(password, encoded),
-            other => Err(IdpError::Internal(format!(
+            other => Err(Error::Internal(format!(
                 "Password algorithm {} is not registered",
                 other.code()
             ))),
         }
     }
 
-    pub fn verify_user(password: &str, user: &AuthUser) -> Result<bool> {
+    pub fn verify_user(password: &str, user: &User) -> Result<bool> {
         let encoded = user
             .password_hash
             .as_deref()
-            .ok_or(IdpError::InvalidCredentials)?;
+            .ok_or(Error::InvalidCredentials)?;
         let algorithm = match user.password_algorithm {
             None => Algorithm::Argon2id,
             Some(code) => Algorithm::from_code(code).ok_or_else(|| {
-                IdpError::AuthFailed(format!("Unsupported password algorithm: {code}"))
+                Error::AuthFailed(format!("Unsupported password algorithm: {code}"))
             })?,
         };
         Self::verify(password, encoded, algorithm)
+    }
+
+    pub fn verify_user_with(password: &str, user: &User, codecs: &Codecs) -> Result<bool> {
+        let encoded = user
+            .password_hash
+            .as_deref()
+            .ok_or(Error::InvalidCredentials)?;
+        let algorithm = match user.password_algorithm {
+            None => Algorithm::Argon2id,
+            Some(code) => Algorithm::from_code(code).unwrap_or(Algorithm::Custom(code)),
+        };
+        codecs.verify(password, encoded, algorithm)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct Demo;
+
+    impl Codec for Demo {
+        fn algorithm(&self) -> Algorithm {
+            Algorithm::Custom(99)
+        }
+
+        fn hash(&self, password: &str) -> Result<String> {
+            Ok(format!("demo:{password}"))
+        }
+
+        fn verify(&self, password: &str, encoded: &str) -> Result<bool> {
+            Ok(encoded == format!("demo:{password}"))
+        }
+    }
+
+    #[test]
+    fn custom_codec_can_verify_user() {
+        let codecs = Codecs::default().with(Demo);
+        let user = User {
+            id: 1,
+            username: "alice".into(),
+            email: None,
+            phone: None,
+            password_hash: Some("demo:secret".into()),
+            password_algorithm: Some(99),
+            is_active: true,
+        };
+        assert!(Password::verify_user_with("secret", &user, &codecs).unwrap());
+        assert!(!Password::verify_user_with("wrong", &user, &codecs).unwrap());
     }
 }

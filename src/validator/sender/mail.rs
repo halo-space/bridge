@@ -1,4 +1,4 @@
-use crate::error::{IdpError, Result};
+use crate::error::{Error, Result};
 use lettre::message::MultiPart;
 use lettre::message::header::ContentType;
 use lettre::transport::smtp::authentication::Credentials;
@@ -37,7 +37,7 @@ pub struct SmtpConfig {
     #[serde(default)]
     pub username: String,
     /// 认证密码或授权码
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     pub password: String,
     /// 发件人地址 (通常与 username 相同)
     #[serde(default)]
@@ -99,12 +99,12 @@ impl SmtpSender {
     ) -> Result<()> {
         if !self.is_active() {
             if self.config.strict {
-                return Err(IdpError::EmailFailed(
+                return Err(Error::EmailFailed(
                     "SMTP channel is disabled or incomplete".into(),
                 ));
             }
             tracing::info!(
-                target: "idp::mailer",
+                target: "bridge::mail",
                 "SMTP 未启用或配置不全，跳过公网邮件投递: to={}, subject={}",
                 to,
                 subject
@@ -125,11 +125,11 @@ impl SmtpSender {
             .from(
                 from_header
                     .parse()
-                    .map_err(|e| IdpError::EmailFailed(format!("Invalid from email: {e}")))?,
+                    .map_err(|e| Error::EmailFailed(format!("Invalid from email: {e}")))?,
             )
             .to(to_header
                 .parse()
-                .map_err(|e| IdpError::EmailFailed(format!("Invalid to email: {e}")))?)
+                .map_err(|e| Error::EmailFailed(format!("Invalid to email: {e}")))?)
             .subject(subject);
 
         let email = if let Some(txt) = plain_text {
@@ -138,12 +138,12 @@ impl SmtpSender {
                     txt.to_string(),
                     html_body.to_string(),
                 ))
-                .map_err(|e| IdpError::EmailFailed(format!("Build multipart email failed: {e}")))?
+                .map_err(|e| Error::EmailFailed(format!("Build multipart email failed: {e}")))?
         } else {
             email_builder
                 .header(ContentType::TEXT_HTML)
                 .body(html_body.to_string())
-                .map_err(|e| IdpError::EmailFailed(format!("Build email failed: {e}")))?
+                .map_err(|e| Error::EmailFailed(format!("Build email failed: {e}")))?
         };
 
         // 构造异步 SMTP Transport
@@ -152,10 +152,10 @@ impl SmtpSender {
         transport
             .send(email)
             .await
-            .map_err(|e| IdpError::EmailFailed(format!("SMTP send failed to {}: {e}", to)))?;
+            .map_err(|e| Error::EmailFailed(format!("SMTP send failed to {}: {e}", to)))?;
 
         tracing::info!(
-            target: "idp::mailer",
+            target: "bridge::mail",
             "SMTP 邮件投递成功: to={}, subject={}",
             to,
             subject
@@ -259,9 +259,9 @@ impl SmtpSender {
             "tls" | "ssl" => {
                 // 465 隐式 TLS
                 let tls_params = TlsParameters::new(host.to_string())
-                    .map_err(|e| IdpError::EmailFailed(format!("TLS config error: {e}")))?;
+                    .map_err(|e| Error::EmailFailed(format!("TLS config error: {e}")))?;
                 AsyncSmtpTransport::<Tokio1Executor>::relay(host)
-                    .map_err(|e| IdpError::EmailFailed(format!("Invalid SMTP host {}: {e}", host)))?
+                    .map_err(|e| Error::EmailFailed(format!("Invalid SMTP host {}: {e}", host)))?
                     .port(port)
                     .tls(Tls::Wrapper(tls_params))
                     .credentials(creds)
@@ -269,9 +269,9 @@ impl SmtpSender {
             "starttls" => {
                 // 587 STARTTLS
                 let tls_params = TlsParameters::new(host.to_string())
-                    .map_err(|e| IdpError::EmailFailed(format!("STARTTLS config error: {e}")))?;
+                    .map_err(|e| Error::EmailFailed(format!("STARTTLS config error: {e}")))?;
                 AsyncSmtpTransport::<Tokio1Executor>::relay(host)
-                    .map_err(|e| IdpError::EmailFailed(format!("Invalid SMTP host {}: {e}", host)))?
+                    .map_err(|e| Error::EmailFailed(format!("Invalid SMTP host {}: {e}", host)))?
                     .port(port)
                     .tls(Tls::Required(tls_params))
                     .credentials(creds)
@@ -322,6 +322,6 @@ mod tests {
         let res = sender
             .send_verification_code("test@example.com", "123456", "login", 300)
             .await;
-        assert!(matches!(res, Err(IdpError::EmailFailed(_))));
+        assert!(matches!(res, Err(Error::EmailFailed(_))));
     }
 }

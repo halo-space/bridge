@@ -1,4 +1,4 @@
-//! # idp
+//! # bridge
 //!
 //! Halo Core Identity Provider, Multi-factor Authentication & OIDC Protocol Engine.
 //!
@@ -25,16 +25,19 @@ pub mod types;
 pub mod validator;
 
 pub use audit::{AuditEvent, AuditEventType, AuditOutcome};
-pub use error::{IdpError, Result};
+pub use error::{Error, Result};
 pub use factor::basic::magic::{MagicLinkConfig, MagicLinkPayload, MagicLinkService};
+#[cfg(feature = "enterprise")]
 pub use factor::enterprise::{Device, DeviceProof};
 pub use factor::oidc::{Nonce, Pkce, State};
+#[cfg(feature = "full")]
+pub use pipeline::Services;
 pub use pipeline::{
-    Arg, Card, Cards, Context, Edge, EdgeConfig, Effect, Event, Fallback, Join, Kind, Node,
-    NodeConfig, Op, Output, Pipeline, PipelineConfig, Progress, Resolve, Run, Runner, Secret,
-    Services, secret,
+    Arg, Card, Cards, Claim, Context, Edge, EdgeConfig, Effect, Effects, Event, Fallback, Join,
+    Kind, Node, NodeConfig, Op, Output, Pipeline, PipelineConfig, Progress, Resolve, Run, Runner,
+    Secret, secret,
 };
-pub use pkg::password::{Algorithm, Argon2id, Bcrypt, Codec, Password, Pbkdf2, Sm3};
+pub use pkg::password::{Algorithm, Argon2id, Bcrypt, Codec, Codecs, Password, Pbkdf2, Sm3};
 pub use pkg::recovery::RecoveryCode;
 pub use pkg::rsa::RsaCrypto;
 pub use pkg::totp::Totp;
@@ -42,19 +45,20 @@ pub use risk::{RiskAssessment, RiskConfig, RiskDecision, RiskEngine, UserHistory
 pub use rules::{Reauth, Rules};
 pub use store::Devices;
 pub use store::{Clients, Events, Factors, Limits, Passkeys, Secrets, Users};
-pub use types::{
-    AuthCode, AuthResult, AuthUser, Identity, Level, Method, OAuthClient, TotpBinding,
-};
+pub use types::{AuthCode, AuthResult, Identity, Level, Method, OAuthClient, TotpBinding, User};
 pub use validator::issuer::{CaptchaIssuer, CodeIssuer, RecoveryIssuer, Scene, TotpIssuer};
+#[cfg(feature = "sms")]
 pub use validator::sender::sms::{BoxFuture, Sender, SmsConfig, SmsSender};
+#[cfg(all(feature = "mail", feature = "sms"))]
 pub use validator::sender::{NotificationService, NotifyChannel};
+#[cfg(feature = "mail")]
 pub use validator::sender::{SmtpConfig, SmtpSender};
 pub use validator::verifier::Passcode;
 pub use validator::verifier::captcha::CaptchaVerifier;
 pub use validator::verifier::captcha::{CaptchaChallenge, CaptchaType, CaptchaVerifyReq};
-pub use validator::verifier::{
-    Recovery as RecoveryVerifier, Start, Totp as TotpVerifier, WebAuthn,
-};
+pub use validator::verifier::{Recovery as RecoveryVerifier, Totp as TotpVerifier};
+#[cfg(feature = "passkey")]
+pub use validator::verifier::{Start, WebAuthn};
 
 /// 对外统一命名空间：`halo::bridge::*`。
 pub mod bridge {
@@ -70,17 +74,27 @@ pub mod bridge {
     pub use crate::types;
     pub use crate::validator;
 
+    #[cfg(feature = "full")]
+    pub use crate::Services;
     pub use crate::{
-        Algorithm, Arg, Argon2id, AuditEvent, AuditEventType, AuditOutcome, Bcrypt, BoxFuture,
+        Algorithm, Arg, Argon2id, AuditEvent, AuditEventType, AuditOutcome, Bcrypt,
         CaptchaChallenge, CaptchaIssuer, CaptchaType, CaptchaVerifier, CaptchaVerifyReq, Card,
-        Cards, Clients, CodeIssuer, Codec, Context, Device, DeviceProof, Devices, Edge, EdgeConfig,
-        Effect, Event, Events, Factors, Fallback, Identity, IdpError, Join, Kind, Limits, Method,
-        Node, NodeConfig, Nonce, NotificationService, OAuthClient, Op, Output, Passcode, Passkeys,
-        Password, Pbkdf2, Pipeline, PipelineConfig, Progress, Reauth, RecoveryCode, RecoveryIssuer,
+        Cards, Claim, Clients, CodeIssuer, Codec, Codecs, Context, Devices, Edge, EdgeConfig,
+        Effect, Effects, Error, Event, Events, Factors, Fallback, Identity, Join, Kind, Limits,
+        Method, Node, NodeConfig, Nonce, OAuthClient, Op, Output, Passcode, Passkeys, Password,
+        Pbkdf2, Pipeline, PipelineConfig, Progress, Reauth, RecoveryCode, RecoveryIssuer,
         RecoveryVerifier, Resolve, Result, RiskAssessment, RiskConfig, RiskDecision, RiskEngine,
-        Run, Runner, Scene, Secret, Secrets, Sender, Services, Sm3, SmsConfig, SmsSender,
-        SmtpConfig, SmtpSender, Start, State, Totp, TotpIssuer, TotpVerifier, Users, WebAuthn,
-        secret,
+        Run, Runner, Scene, Secret, Secrets, Sm3, Totp, TotpIssuer, TotpVerifier, Users, secret,
     };
-    pub use crate::{AuthCode, AuthResult, AuthUser, Level, Rules, TotpBinding};
+    pub use crate::{AuthCode, AuthResult, Level, Rules, TotpBinding, User};
+    #[cfg(feature = "sms")]
+    pub use crate::{BoxFuture, Sender, SmsConfig, SmsSender};
+    #[cfg(feature = "enterprise")]
+    pub use crate::{Device, DeviceProof};
+    #[cfg(all(feature = "mail", feature = "sms"))]
+    pub use crate::{NotificationService, NotifyChannel};
+    #[cfg(feature = "mail")]
+    pub use crate::{SmtpConfig, SmtpSender};
+    #[cfg(feature = "passkey")]
+    pub use crate::{Start, WebAuthn};
 }

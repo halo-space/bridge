@@ -1,5 +1,5 @@
 use super::same;
-use crate::error::{IdpError, Result};
+use crate::error::{Error, Result};
 use crate::store::Secrets;
 
 /// 一次性验证码校验。
@@ -11,14 +11,11 @@ impl Passcode {
     }
 
     pub async fn take<K: Secrets>(kv: &K, key: &str, actual: &str) -> Result<()> {
-        let expected = kv
-            .get(key)
-            .await?
-            .ok_or(IdpError::InvalidVerificationCode)?;
+        let expected = kv.get(key).await?.ok_or(Error::InvalidVerificationCode)?;
         if Self::check(&expected, actual) && kv.take_if(key, &expected).await? {
             Ok(())
         } else {
-            Err(IdpError::InvalidVerificationCode)
+            Err(Error::InvalidVerificationCode)
         }
     }
 }

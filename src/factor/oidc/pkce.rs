@@ -4,12 +4,13 @@ use rand_core::{OsRng, RngCore};
 use sha2::{Digest, Sha256};
 
 use super::same;
-use crate::error::{IdpError, Result};
+use crate::error::{Error, Result};
 
 /// PKCE 校验。
 pub struct Pkce;
 
 impl Pkce {
+    #[allow(clippy::new_ret_no_self)]
     pub fn new() -> (String, String) {
         let mut bytes = [0u8; 32];
         OsRng.fill_bytes(&mut bytes);
@@ -22,7 +23,7 @@ impl Pkce {
 
     pub fn check(verifier: &str, challenge: &str, method: Option<&str>) -> Result<()> {
         if !Self::valid(verifier) {
-            return Err(IdpError::InvalidPkce);
+            return Err(Error::InvalidPkce);
         }
         match method.unwrap_or("plain") {
             "S256" => {
@@ -30,11 +31,11 @@ impl Pkce {
                 hasher.update(verifier.as_bytes());
                 let computed = URL_SAFE_NO_PAD.encode(hasher.finalize());
                 if !same(&computed, challenge) {
-                    return Err(IdpError::InvalidPkce);
+                    return Err(Error::InvalidPkce);
                 }
             }
             "plain" if Self::valid(challenge) && same(verifier, challenge) => {}
-            _ => return Err(IdpError::InvalidPkce),
+            _ => return Err(Error::InvalidPkce),
         }
         Ok(())
     }

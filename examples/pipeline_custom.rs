@@ -5,7 +5,7 @@ struct Defaults;
 
 impl Runner for Defaults {
     async fn run(&self, node: &Node, _context: &Context) -> halo::Result<Output> {
-        Err(halo::IdpError::Unsupported(format!(
+        Err(halo::Error::Unsupported(format!(
             "Unsupported pipeline node: {}",
             node.id
         )))
@@ -17,7 +17,7 @@ struct CompanyPassword;
 impl Runner for CompanyPassword {
     async fn run(&self, node: &Node, context: &Context) -> halo::Result<Output> {
         if node.kind != halo::bridge::Kind::Verify("password".into()) {
-            return Err(halo::IdpError::Unsupported(format!(
+            return Err(halo::Error::Unsupported(format!(
                 "Unsupported pipeline node: {}",
                 node.id
             )));
@@ -26,11 +26,11 @@ impl Runner for CompanyPassword {
             .data
             .get(&node.id)
             .and_then(Value::as_object)
-            .ok_or_else(|| halo::IdpError::InvalidCredentials)?;
+            .ok_or(halo::Error::InvalidCredentials)?;
         if input.get("username").and_then(Value::as_str) != Some("alice")
             || input.get("password").and_then(Value::as_str) != Some("company-secret")
         {
-            return Err(halo::IdpError::InvalidCredentials);
+            return Err(halo::Error::InvalidCredentials);
         }
         Ok(Output::Pass {
             routes: Vec::new(),

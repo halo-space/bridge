@@ -1,11 +1,13 @@
 use super::SocialProfile;
-use crate::error::{IdpError, Result};
+use crate::error::{Error, Result};
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 use url::Url;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GoogleConfig {
     pub client_id: String,
+    #[serde(default, skip_serializing)]
     pub client_secret: String,
     pub scope: Option<String>,
 }
@@ -13,6 +15,8 @@ pub struct GoogleConfig {
 pub struct GoogleProvider {
     config: GoogleConfig,
     endpoint: String,
+    userinfo_endpoint: String,
+    timeout: Duration,
 }
 
 impl GoogleProvider {
@@ -20,6 +24,8 @@ impl GoogleProvider {
         Self {
             config,
             endpoint: "https://oauth2.googleapis.com".into(),
+            userinfo_endpoint: "https://openidconnect.googleapis.com/v1/userinfo".into(),
+            timeout: crate::pkg::http::DEFAULT_TIMEOUT,
         }
     }
 
@@ -28,10 +34,20 @@ impl GoogleProvider {
         self
     }
 
+    pub fn userinfo_endpoint(mut self, endpoint: impl Into<String>) -> Self {
+        self.userinfo_endpoint = endpoint.into();
+        self
+    }
+
+    pub fn timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout.max(Duration::from_secs(1));
+        self
+    }
+
     /// 构造 Google OAuth2 授权跳转链接
     pub fn get_authorize_url(&self, state: &str, redirect_uri: &str) -> Result<String> {
         let mut u = Url::parse("https://accounts.google.com/o/oauth2/v2/auth")
-            .map_err(|e| IdpError::Internal(e.to_string()))?;
+            .map_err(|e| Error::Internal(e.to_string()))?;
 
         let scope = self
             .config
@@ -53,7 +69,7 @@ impl GoogleProvider {
     pub fn parse_user_json(user_json: &serde_json::Value) -> Result<SocialProfile> {
         let sub = user_json["sub"]
             .as_str()
-            .ok_or_else(|| IdpError::OAuthError("Missing Google sub identifier".into()))?
+            .ok_or_else(|| Error::OAuthError("Missing Google sub identifier".into()))?
             .to_string();
 
         let name = user_json["name"].as_str().map(|s| s.to_string());
@@ -79,7 +95,7 @@ impl GoogleProvider {
         code: &str,
         redirect_uri: &str,
     ) -> Result<SocialProfile> {
-        let http = reqwest::Client::new();
+        let http = crate::pkg::http::client(self.timeout)?;
         let token_resp = http
             .post(format!("{}/token", self.endpoint.trim_end_matches('/')))
             .form(&[
@@ -91,12 +107,14 @@ impl GoogleProvider {
             ])
             .send()
             .await
-            .map_err(|e| IdpError::OAuthError(format!("Google token exchange error: {e}")))?;
+            .map_err(|e| Error::OAuthError(format!("Google token exchange error: {e}")))?;
 
         let token_json: serde_json::Value = token_resp
+            .error_for_status()
+            .map_err(|e| Error::OAuthError(format!("Google token HTTP error: {e}")))?
             .json()
             .await
-            .map_err(|e| IdpError::OAuthError(format!("Invalid Google token JSON: {e}")))?;
+            .map_err(|e| Error::OAuthError(format!("Invalid Google token JSON: {e}")))?;
         let access_token = token_json
             .get("access_token")
             .and_then(|value| value.as_str())
@@ -106,19 +124,21 @@ impl GoogleProvider {
                     .or_else(|| token_json.get("error"))
                     .and_then(|value| value.as_str())
                     .unwrap_or("missing access_token");
-                IdpError::OAuthError(format!("Google token exchange failed: {message}"))
+                Error::OAuthError(format!("Google token exchange failed: {message}"))
             })?;
 
         let user_resp = http
-            .get("https://openidconnect.googleapis.com/v1/userinfo")
+            .get(&self.userinfo_endpoint)
             .bearer_auth(access_token)
             .send()
             .await
-            .map_err(|e| IdpError::OAuthError(format!("Google userinfo error: {e}")))?;
+            .map_err(|e| Error::OAuthError(format!("Google userinfo error: {e}")))?;
         let user_json: serde_json::Value = user_resp
+            .error_for_status()
+            .map_err(|e| Error::OAuthError(format!("Google userinfo HTTP error: {e}")))?
             .json()
             .await
-            .map_err(|e| IdpError::OAuthError(format!("Invalid Google userinfo JSON: {e}")))?;
+            .map_err(|e| Error::OAuthError(format!("Invalid Google userinfo JSON: {e}")))?;
         Self::parse_user_json(&user_json)
     }
 }

@@ -109,6 +109,4 @@ pub struct IntrospectResponse {
     pub exp: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub iat: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tenant_id: Option<i64>,
 }

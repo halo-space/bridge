@@ -1,17 +1,20 @@
-use crate::error::{IdpError, Result};
+use crate::error::{Error, Result};
 use crate::types::Identity;
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 use url::Url;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DingtalkConfig {
     pub client_id: String,
+    #[serde(default, skip_serializing)]
     pub client_secret: String,
 }
 
 pub struct DingtalkProvider {
     config: DingtalkConfig,
     endpoint: String,
+    timeout: Duration,
 }
 
 impl DingtalkProvider {
@@ -19,6 +22,7 @@ impl DingtalkProvider {
         Self {
             config,
             endpoint: "https://api.dingtalk.com".into(),
+            timeout: crate::pkg::http::DEFAULT_TIMEOUT,
         }
     }
 
@@ -27,10 +31,15 @@ impl DingtalkProvider {
         self
     }
 
+    pub fn timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout.max(Duration::from_secs(1));
+        self
+    }
+
     /// 构造钉钉 OAuth2.0 统一登录授权链接
     pub fn get_authorize_url(&self, state: &str, redirect_uri: &str) -> Result<String> {
         let mut u = Url::parse("https://login.dingtalk.com/oauth2/auth")
-            .map_err(|e| IdpError::Internal(e.to_string()))?;
+            .map_err(|e| Error::Internal(e.to_string()))?;
 
         u.query_pairs_mut()
             .append_pair("client_id", &self.config.client_id)
@@ -45,7 +54,7 @@ impl DingtalkProvider {
 
     /// 使用 authorization_code 向钉钉换取 userAccessToken 并拉取用户信息
     pub async fn exchange_code_for_user(&self, code: &str) -> Result<serde_json::Value> {
-        let http = reqwest::Client::new();
+        let http = crate::pkg::http::client(self.timeout)?;
         let token_url = format!(
             "{}/v1.0/oauth2/userAccessToken",
             self.endpoint.trim_end_matches('/')
@@ -59,19 +68,21 @@ impl DingtalkProvider {
         });
 
         let resp = http.post(token_url).json(&body).send().await.map_err(|e| {
-            IdpError::OAuthError(format!("Dingtalk token exchange network error: {e}"))
+            Error::OAuthError(format!("Dingtalk token exchange network error: {e}"))
         })?;
 
         let token_json: serde_json::Value = resp
+            .error_for_status()
+            .map_err(|e| Error::OAuthError(format!("Dingtalk token HTTP error: {e}")))?
             .json()
             .await
-            .map_err(|e| IdpError::OAuthError(format!("Invalid Dingtalk token JSON: {e}")))?;
+            .map_err(|e| Error::OAuthError(format!("Invalid Dingtalk token JSON: {e}")))?;
 
         let access_token = token_json["accessToken"].as_str().ok_or_else(|| {
             let msg = token_json["message"]
                 .as_str()
                 .unwrap_or("missing accessToken");
-            IdpError::OAuthError(format!("Dingtalk token error: {msg}"))
+            Error::OAuthError(format!("Dingtalk token error: {msg}"))
         })?;
 
         // 拉取用户信息
@@ -84,12 +95,14 @@ impl DingtalkProvider {
             .header("x-acs-dingtalk-access-token", access_token)
             .send()
             .await
-            .map_err(|e| IdpError::OAuthError(format!("Dingtalk user fetch network error: {e}")))?;
+            .map_err(|e| Error::OAuthError(format!("Dingtalk user fetch network error: {e}")))?;
 
         let user_json: serde_json::Value = user_resp
+            .error_for_status()
+            .map_err(|e| Error::OAuthError(format!("Dingtalk user HTTP error: {e}")))?
             .json()
             .await
-            .map_err(|e| IdpError::OAuthError(format!("Invalid Dingtalk user JSON: {e}")))?;
+            .map_err(|e| Error::OAuthError(format!("Invalid Dingtalk user JSON: {e}")))?;
 
         Ok(user_json)
     }
@@ -99,7 +112,7 @@ impl DingtalkProvider {
             .get("unionId")
             .or_else(|| value.get("openId"))
             .and_then(|v| v.as_str())
-            .ok_or_else(|| IdpError::AuthFailed("Dingtalk identity is missing subject".into()))?;
+            .ok_or_else(|| Error::AuthFailed("Dingtalk identity is missing subject".into()))?;
         let mut identity = Identity::new("dingtalk", subject);
         if let Some(email) = value.get("email").and_then(|v| v.as_str()) {
             identity = identity.email(email);

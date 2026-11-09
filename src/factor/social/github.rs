@@ -1,11 +1,13 @@
 use super::SocialProfile;
-use crate::error::{IdpError, Result};
+use crate::error::{Error, Result};
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 use url::Url;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GithubConfig {
     pub client_id: String,
+    #[serde(default, skip_serializing)]
     pub client_secret: String,
     pub scope: Option<String>,
 }
@@ -13,6 +15,8 @@ pub struct GithubConfig {
 pub struct GithubProvider {
     config: GithubConfig,
     endpoint: String,
+    api_endpoint: String,
+    timeout: Duration,
 }
 
 impl GithubProvider {
@@ -20,6 +24,8 @@ impl GithubProvider {
         Self {
             config,
             endpoint: "https://github.com".into(),
+            api_endpoint: "https://api.github.com".into(),
+            timeout: crate::pkg::http::DEFAULT_TIMEOUT,
         }
     }
 
@@ -28,10 +34,23 @@ impl GithubProvider {
         self
     }
 
+    pub fn api_endpoint(mut self, endpoint: impl Into<String>) -> Self {
+        self.api_endpoint = endpoint.into();
+        self
+    }
+
+    pub fn timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout.max(Duration::from_secs(1));
+        self
+    }
+
     /// 构造 GitHub OAuth 授权重定向跳转 URL
     pub fn get_authorize_url(&self, state: &str, redirect_uri: &str) -> Result<String> {
-        let mut u = Url::parse("https://github.com/login/oauth/authorize")
-            .map_err(|e| IdpError::Internal(e.to_string()))?;
+        let mut u = Url::parse(&format!(
+            "{}/login/oauth/authorize",
+            self.endpoint.trim_end_matches('/')
+        ))
+        .map_err(|e| Error::Internal(e.to_string()))?;
 
         let scope = self
             .config
@@ -53,7 +72,7 @@ impl GithubProvider {
             .as_i64()
             .map(|i| i.to_string())
             .or_else(|| user_json["id"].as_str().map(|s| s.to_string()))
-            .ok_or_else(|| IdpError::OAuthError("Missing GitHub user id".into()))?;
+            .ok_or_else(|| Error::OAuthError("Missing GitHub user id".into()))?;
 
         let login = user_json["login"].as_str().map(|s| s.to_string());
         let name = user_json["name"].as_str().map(|s| s.to_string());
@@ -79,7 +98,7 @@ impl GithubProvider {
         code: &str,
         redirect_uri: &str,
     ) -> Result<SocialProfile> {
-        let http = reqwest::Client::new();
+        let http = crate::pkg::http::client(self.timeout)?;
 
         // 1. 换取 access_token
         let token_url = format!(
@@ -99,60 +118,63 @@ impl GithubProvider {
             .form(&params)
             .send()
             .await
-            .map_err(|e| {
-                IdpError::OAuthError(format!("GitHub token exchange network error: {e}"))
-            })?;
+            .map_err(|e| Error::OAuthError(format!("GitHub token exchange network error: {e}")))?;
 
         let token_json: serde_json::Value = token_resp
+            .error_for_status()
+            .map_err(|e| Error::OAuthError(format!("GitHub token HTTP error: {e}")))?
             .json()
             .await
-            .map_err(|e| IdpError::OAuthError(format!("Invalid GitHub token JSON: {e}")))?;
+            .map_err(|e| Error::OAuthError(format!("Invalid GitHub token JSON: {e}")))?;
 
         let access_token = token_json["access_token"].as_str().ok_or_else(|| {
             let err = token_json["error_description"]
                 .as_str()
                 .or_else(|| token_json["error"].as_str())
                 .unwrap_or("missing access_token");
-            IdpError::OAuthError(format!("GitHub token error: {err}"))
+            Error::OAuthError(format!("GitHub token error: {err}"))
         })?;
 
         // 2. 拉取用户信息
         let user_resp = http
-            .get("https://api.github.com/user")
+            .get(format!("{}/user", self.api_endpoint.trim_end_matches('/')))
             .header("Authorization", format!("Bearer {access_token}"))
             .header("User-Agent", "Halo-IdP")
             .header("Accept", "application/json")
             .send()
             .await
-            .map_err(|e| IdpError::OAuthError(format!("GitHub user fetch network error: {e}")))?;
+            .map_err(|e| Error::OAuthError(format!("GitHub user fetch network error: {e}")))?;
 
         let mut user_json: serde_json::Value = user_resp
+            .error_for_status()
+            .map_err(|e| Error::OAuthError(format!("GitHub user HTTP error: {e}")))?
             .json()
             .await
-            .map_err(|e| IdpError::OAuthError(format!("Invalid GitHub user JSON: {e}")))?;
+            .map_err(|e| Error::OAuthError(format!("Invalid GitHub user JSON: {e}")))?;
 
         // 若用户公开邮箱为空，尝试拉取 primary 邮箱
-        if user_json["email"].is_null() {
-            if let Ok(emails_resp) = http
-                .get("https://api.github.com/user/emails")
+        if user_json["email"].is_null()
+            && let Ok(emails_resp) = http
+                .get(format!(
+                    "{}/user/emails",
+                    self.api_endpoint.trim_end_matches('/')
+                ))
                 .header("Authorization", format!("Bearer {access_token}"))
                 .header("User-Agent", "Halo-IdP")
                 .header("Accept", "application/json")
                 .send()
                 .await
-            {
-                if let Ok(emails_json) = emails_resp.json::<serde_json::Value>().await {
-                    if let Some(arr) = emails_json.as_array() {
-                        let primary_email = arr
-                            .iter()
-                            .find(|e| e["primary"].as_bool().unwrap_or(false))
-                            .and_then(|e| e["email"].as_str())
-                            .or_else(|| arr.first().and_then(|e| e["email"].as_str()));
-                        if let Some(em) = primary_email {
-                            user_json["email"] = serde_json::json!(em);
-                        }
-                    }
-                }
+            && let Ok(emails_resp) = emails_resp.error_for_status()
+            && let Ok(emails_json) = emails_resp.json::<serde_json::Value>().await
+            && let Some(arr) = emails_json.as_array()
+        {
+            let primary_email = arr
+                .iter()
+                .find(|e| e["primary"].as_bool().unwrap_or(false))
+                .and_then(|e| e["email"].as_str())
+                .or_else(|| arr.first().and_then(|e| e["email"].as_str()));
+            if let Some(em) = primary_email {
+                user_json["email"] = serde_json::json!(em);
             }
         }
 

@@ -116,7 +116,7 @@ impl RiskEngine {
         // 1. 连续失败登录惩罚
         if ctx.consecutive_failed_attempts > 0 {
             let fail_score =
-                (ctx.consecutive_failed_attempts as u32) * (self.config.weight_per_failure as u32);
+                ctx.consecutive_failed_attempts * (self.config.weight_per_failure as u32);
             score += fail_score;
             factors.push(format!(
                 "CONSECUTIVE_FAILURES: count={}, +{}pts",
@@ -154,17 +154,16 @@ impl RiskEngine {
             &ctx.geo_country,
             &history.last_country,
             history.last_login_at,
-        ) {
-            if curr_country != last_country {
-                let diff_secs = (ctx.timestamp - last_time).abs();
-                // 若相隔少于 2 小时 (7200秒)
-                if diff_secs < 7200 {
-                    score += self.config.weight_impossible_travel as u32;
-                    factors.push(format!(
-                        "IMPOSSIBLE_TRAVEL: from {} to {} in {}s, +{}pts",
-                        last_country, curr_country, diff_secs, self.config.weight_impossible_travel
-                    ));
-                }
+        ) && curr_country != last_country
+        {
+            let diff_secs = (ctx.timestamp - last_time).abs();
+            // 若相隔少于 2 小时 (7200秒)
+            if diff_secs < 7200 {
+                score += self.config.weight_impossible_travel as u32;
+                factors.push(format!(
+                    "IMPOSSIBLE_TRAVEL: from {} to {} in {}s, +{}pts",
+                    last_country, curr_country, diff_secs, self.config.weight_impossible_travel
+                ));
             }
         }
 

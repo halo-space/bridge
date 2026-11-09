@@ -38,12 +38,12 @@ impl Policy {
         let now = chrono::Utc::now().timestamp();
 
         // 1. 检查是否在锁定窗口期内
-        if let Some(locked_until) = locked_until_timestamp {
-            if locked_until > now {
-                return Decision::Locked {
-                    remaining_seconds: (locked_until - now) as u64,
-                };
-            }
+        if let Some(locked_until) = locked_until_timestamp
+            && locked_until > now
+        {
+            return Decision::Locked {
+                remaining_seconds: (locked_until - now) as u64,
+            };
         }
 
         // 2. 检查是否超过最大失败上限

@@ -1,4 +1,4 @@
-use crate::error::{IdpError, Result};
+use crate::error::{Error, Result};
 use crate::store::Secrets;
 use base64::Engine;
 use base64::prelude::BASE64_URL_SAFE_NO_PAD;
@@ -16,6 +16,7 @@ pub struct MagicLinkConfig {
     /// 前端消费魔术链接的基础回调地址, 如 "https://auth.halo.com/api/v1/auth/magic-callback"
     pub base_url: String,
     /// 签名密钥 (建议 32 字节以上随机强密钥)
+    #[serde(default = "default_signing_secret", skip_serializing)]
     pub signing_secret: String,
     /// 魔术链接有效期 (秒), 默认 900 秒 (15 分钟)
     #[serde(default = "default_ttl")]
@@ -26,11 +27,19 @@ fn default_ttl() -> u64 {
     900
 }
 
+fn default_signing_secret() -> String {
+    use base64::Engine;
+    use rand_core::{OsRng, RngCore};
+    let mut secret = [0_u8; 32];
+    OsRng.fill_bytes(&mut secret);
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(secret)
+}
+
 impl Default for MagicLinkConfig {
     fn default() -> Self {
         Self {
             base_url: "https://halo.local/auth/magic-verify".to_string(),
-            signing_secret: "halo_magic_link_default_insecure_secret_key_32b!".to_string(),
+            signing_secret: default_signing_secret(),
             ttl_seconds: 900,
         }
     }
@@ -83,10 +92,13 @@ impl MagicLinkService {
         action: &str,
         redirect_to: Option<&str>,
     ) -> Result<(String, String)> {
-        if email.trim().is_empty() {
-            return Err(IdpError::MagicLinkError(
-                "Email cannot be empty".to_string(),
+        if self.config.signing_secret.trim().len() < 32 {
+            return Err(Error::MagicLinkError(
+                "Magic link signing secret must contain at least 32 characters".into(),
             ));
+        }
+        if email.trim().is_empty() {
+            return Err(Error::MagicLinkError("Email cannot be empty".to_string()));
         }
 
         let now = Self::current_timestamp();
@@ -101,15 +113,15 @@ impl MagicLinkService {
         };
 
         let payload_json = serde_json::to_string(&payload)
-            .map_err(|e| IdpError::MagicLinkError(format!("Serialize payload failed: {}", e)))?;
+            .map_err(|e| Error::MagicLinkError(format!("Serialize payload failed: {}", e)))?;
         let payload_b64 = BASE64_URL_SAFE_NO_PAD.encode(payload_json.as_bytes());
 
         // 计算 HMAC-SHA256 签名
         let mut mac = HmacSha256::new_from_slice(self.config.signing_secret.as_bytes())
-            .map_err(|e| IdpError::MagicLinkError(format!("Invalid signing secret: {}", e)))?;
+            .map_err(|e| Error::MagicLinkError(format!("Invalid signing secret: {}", e)))?;
         mac.update(payload_b64.as_bytes());
         let signature = mac.finalize().into_bytes();
-        let sig_b64 = BASE64_URL_SAFE_NO_PAD.encode(&signature);
+        let sig_b64 = BASE64_URL_SAFE_NO_PAD.encode(signature);
 
         let token = format!("{}.{}", payload_b64, sig_b64);
 
@@ -126,9 +138,14 @@ impl MagicLinkService {
 
     /// 校验并解密魔术链接 Token
     pub fn verify_token(&self, token: &str) -> Result<MagicLinkPayload> {
+        if self.config.signing_secret.trim().len() < 32 {
+            return Err(Error::MagicLinkError(
+                "Magic link signing secret must contain at least 32 characters".into(),
+            ));
+        }
         let parts: Vec<&str> = token.split('.').collect();
         if parts.len() != 2 {
-            return Err(IdpError::MagicLinkError(
+            return Err(Error::MagicLinkError(
                 "Malformed magic token format".to_string(),
             ));
         }
@@ -139,13 +156,13 @@ impl MagicLinkService {
         // 验证签名
         let provided_sig = BASE64_URL_SAFE_NO_PAD
             .decode(sig_b64)
-            .map_err(|_| IdpError::MagicLinkError("Invalid base64 in signature".to_string()))?;
+            .map_err(|_| Error::MagicLinkError("Invalid base64 in signature".to_string()))?;
 
         let mut check = HmacSha256::new_from_slice(self.config.signing_secret.as_bytes())
-            .map_err(|e| IdpError::MagicLinkError(format!("Invalid signing secret: {}", e)))?;
+            .map_err(|e| Error::MagicLinkError(format!("Invalid signing secret: {}", e)))?;
         check.update(payload_b64.as_bytes());
         if check.verify_slice(&provided_sig).is_err() {
-            return Err(IdpError::MagicLinkError(
+            return Err(Error::MagicLinkError(
                 "Magic link signature mismatch / tampered".to_string(),
             ));
         }
@@ -153,17 +170,15 @@ impl MagicLinkService {
         // 解析 Payload
         let payload_bytes = BASE64_URL_SAFE_NO_PAD
             .decode(payload_b64)
-            .map_err(|_| IdpError::MagicLinkError("Invalid base64 in payload".to_string()))?;
+            .map_err(|_| Error::MagicLinkError("Invalid base64 in payload".to_string()))?;
 
         let payload: MagicLinkPayload = serde_json::from_slice(&payload_bytes)
-            .map_err(|e| IdpError::MagicLinkError(format!("Invalid magic token payload: {}", e)))?;
+            .map_err(|e| Error::MagicLinkError(format!("Invalid magic token payload: {}", e)))?;
 
         // 校验过期时间
         let now = Self::current_timestamp();
         if now > payload.exp {
-            return Err(IdpError::MagicLinkError(
-                "Magic link has expired".to_string(),
-            ));
+            return Err(Error::MagicLinkError("Magic link has expired".to_string()));
         }
 
         Ok(payload)
@@ -191,7 +206,7 @@ impl MagicLinkService {
         let payload = self.verify_token(token)?;
         let key = format!("magic:{}", payload.jti);
         if !kv.take_if(&key, token).await? {
-            return Err(IdpError::MagicLinkError(
+            return Err(Error::MagicLinkError(
                 "Magic link already used or not issued".into(),
             ));
         }
@@ -254,7 +269,7 @@ mod tests {
     fn test_magic_link_expired_fails() {
         let config = MagicLinkConfig {
             base_url: "https://auth.halo.com/verify".to_string(),
-            signing_secret: "secret".to_string(),
+            signing_secret: "secret-key-with-at-least-32-characters".to_string(),
             ttl_seconds: 0, // 立即过期
         };
         let service = MagicLinkService::new(config);

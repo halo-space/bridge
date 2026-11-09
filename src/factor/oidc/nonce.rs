@@ -1,5 +1,5 @@
 use super::same;
-use crate::error::{IdpError, Result};
+use crate::error::{Error, Result};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use rand_core::{OsRng, RngCore};
@@ -8,6 +8,7 @@ use rand_core::{OsRng, RngCore};
 pub struct Nonce;
 
 impl Nonce {
+    #[allow(clippy::new_ret_no_self)]
     pub fn new() -> String {
         let mut bytes = [0u8; 32];
         OsRng.fill_bytes(&mut bytes);
@@ -16,7 +17,7 @@ impl Nonce {
 
     pub fn check(expected: &str, actual: &str) -> Result<()> {
         if expected.is_empty() || !same(expected, actual) {
-            return Err(IdpError::AuthFailed("Invalid nonce".into()));
+            return Err(Error::AuthFailed("Invalid nonce".into()));
         }
         Ok(())
     }

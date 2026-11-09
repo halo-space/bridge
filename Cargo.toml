@@ -1,6 +1,6 @@
 [package]
 name = "halo-bridge"
-version = "0.4.1"
+version = "0.4.2"
 edition = "2024"
 description = "Halo Core Identity Provider, Multi-factor Authentication & OIDC Protocol Engine"
 license = "Apache-2.0"
@@ -11,6 +11,15 @@ categories = ["authentication", "web-programming"]
 
 [lib]
 name = "halo"
+
+[features]
+default = ["full"]
+full = ["mail", "sms", "social", "enterprise", "passkey"]
+mail = ["dep:lettre"]
+sms = ["dep:reqwest"]
+social = ["dep:reqwest"]
+enterprise = ["dep:reqwest", "dep:ldap3", "dep:saml"]
+passkey = ["dep:webauthn-rs"]
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
@@ -29,11 +38,11 @@ hmac = "0.12"
 sha1 = "0.10"
 qrcode = { version = "0.14.1", default-features = false, features = ["svg"] }
 rsa = { version = "0.9", features = ["sha2", "pem"] }
-lettre = { version = "0.11.23", default-features = false, features = ["tokio1-rustls-tls", "smtp-transport", "builder"] }
-reqwest = { version = "0.13.5", default-features = false, features = ["json", "form", "rustls"] }
-ldap3 = { version = "0.12.1", default-features = false, features = ["tls-rustls-ring"] }
-saml = { version = "0.1.0-alpha.1", default-features = false, features = ["rsa-sha", "ecdsa-sha"] }
-webauthn-rs = { version = "0.6.2", features = ["danger-allow-state-serialisation"] }
+lettre = { version = "0.11.23", optional = true, default-features = false, features = ["tokio1-rustls-tls", "smtp-transport", "builder"] }
+reqwest = { version = "0.13.5", optional = true, default-features = false, features = ["json", "form", "rustls"] }
+ldap3 = { version = "0.12.1", optional = true, default-features = false, features = ["tls-rustls-ring"] }
+saml = { version = "0.1.0-alpha.1", optional = true, default-features = false, features = ["rsa-sha", "ecdsa-sha"] }
+webauthn-rs = { version = "0.6.2", optional = true, features = ["danger-allow-state-serialisation"] }
 bcrypt = "0.17"
 pbkdf2 = { version = "0.12", features = ["simple"] }
 sm3 = "0.4"
@@ -45,3 +54,23 @@ tokio = { version = "1", features = ["full"] }
 [[bench]]
 name = "pipeline"
 harness = false
+
+[[test]]
+name = "idp_tests"
+required-features = ["full"]
+
+[[test]]
+name = "pipeline_services"
+required-features = ["full"]
+
+[[test]]
+name = "provider_errors"
+required-features = ["social", "enterprise"]
+
+[[test]]
+name = "saml_tests"
+required-features = ["enterprise"]
+
+[[example]]
+name = "sender_custom"
+required-features = ["sms"]

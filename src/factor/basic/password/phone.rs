@@ -1,20 +1,15 @@
-use crate::error::{IdpError, Result};
-use crate::pkg::password::Password;
+use crate::error::{Error, Result};
+use crate::pkg::password::{Codecs, Password};
 use crate::store::Users;
-use crate::types::AuthUser;
+use crate::types::User;
 use crate::types::{AuthResult, Level, Method};
 
 /// 手机号 + 密码登录。
 pub struct Phone;
 
 impl Phone {
-    pub async fn result<S: Users>(
-        store: &S,
-        tenant_id: i64,
-        phone: &str,
-        password: &str,
-    ) -> Result<AuthResult> {
-        let user = Self::authenticate(store, tenant_id, phone, password).await?;
+    pub async fn result<S: Users>(store: &S, phone: &str, password: &str) -> Result<AuthResult> {
+        let user = Self::authenticate(store, phone, password).await?;
         Ok(AuthResult::new(
             user.identity(),
             Method::Password,
@@ -22,21 +17,25 @@ impl Phone {
         ))
     }
 
-    pub async fn authenticate<S: Users>(
+    pub async fn authenticate<S: Users>(store: &S, phone: &str, password: &str) -> Result<User> {
+        Self::authenticate_with(store, phone, password, &Codecs::default()).await
+    }
+
+    pub async fn authenticate_with<S: Users>(
         store: &S,
-        tenant_id: i64,
         phone: &str,
         password: &str,
-    ) -> Result<AuthUser> {
+        codecs: &Codecs,
+    ) -> Result<User> {
         let user = store
-            .find_by_phone(tenant_id, phone)
+            .find_by_phone(phone)
             .await?
-            .ok_or(IdpError::InvalidCredentials)?;
+            .ok_or(Error::InvalidCredentials)?;
         if !user.is_active {
-            return Err(IdpError::UserDisabled);
+            return Err(Error::UserDisabled);
         }
-        if !Password::verify_user(password, &user)? {
-            return Err(IdpError::InvalidCredentials);
+        if !Password::verify_user_with(password, &user, codecs)? {
+            return Err(Error::InvalidCredentials);
         }
         Ok(user)
     }

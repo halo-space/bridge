@@ -52,6 +52,7 @@ impl CodeIssuer {
         Ok(code)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn issue_with_rate<K: Secrets, R: Limits>(
         kv: &K,
         rate: &R,
@@ -63,13 +64,14 @@ impl CodeIssuer {
         window_secs: u64,
     ) -> Result<String> {
         if !rate.allow(rate_key, limit, window_secs).await? {
-            return Err(crate::error::IdpError::AuthFailed(
+            return Err(crate::error::Error::AuthFailed(
                 "Rate limit exceeded".into(),
             ));
         }
         Self::issue(kv, key, ttl, digits).await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn issue_scene_with_rate<K: Secrets, R: Limits>(
         kv: &K,
         rate: &R,

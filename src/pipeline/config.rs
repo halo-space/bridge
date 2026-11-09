@@ -1,5 +1,5 @@
 use super::{Edge, Join, Node, Pipeline, Runner};
-use crate::error::{IdpError, Result};
+use crate::error::{Error, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -44,7 +44,7 @@ pub struct NodeConfig {
     #[serde(default)]
     pub once: bool,
     #[serde(default)]
-    pub timeout_ms: Option<u64>,
+    pub timeout: Option<u64>,
     #[serde(default)]
     pub retries: u32,
     #[serde(default)]
@@ -74,7 +74,7 @@ impl PipelineConfig {
 
     pub(crate) fn compile(self) -> Result<Pipeline> {
         if self.version != 1 {
-            return Err(IdpError::Internal(format!(
+            return Err(Error::Internal(format!(
                 "Unsupported pipeline config version: {}",
                 self.version
             )));
@@ -97,7 +97,7 @@ impl PipelineConfig {
 
 fn config_hash(config: &PipelineConfig) -> Result<String> {
     let data = serde_json::to_vec(config)
-        .map_err(|e| IdpError::Internal(format!("Serialize pipeline config failed: {e}")))?;
+        .map_err(|e| Error::Internal(format!("Serialize pipeline config failed: {e}")))?;
     Ok(Sha256::digest(data)
         .iter()
         .map(|byte| format!("{byte:02x}"))
@@ -118,7 +118,7 @@ impl NodeConfig {
         node.join = self.join;
         node.limit = self.limit;
         node.once = self.once;
-        node.timeout_ms = self.timeout_ms;
+        node.timeout = self.timeout;
         node.retries = self.retries;
         node.idempotency = self.idempotency;
         node.edges = self
@@ -178,62 +178,6 @@ pub fn secret(key: impl Into<String>) -> Value {
 #[allow(async_fn_in_trait)]
 pub trait Resolve: Send + Sync {
     async fn secret(&self, key: &str) -> Result<String>;
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn compiles_page_config_and_checks_registered_cards() {
-        let config: PipelineConfig = serde_json::from_value(serde_json::json!({
-            "version": 1,
-            "start": "input",
-            "nodes": [
-                {
-                    "id": "input",
-                    "type": "input",
-                    "fields": ["username", "password"],
-                    "edges": [{"to": "password"}]
-                },
-                {
-                    "id": "password",
-                    "type": "verify",
-                    "code": "password",
-                    "args": {"source": "company"}
-                }
-            ]
-        }))
-        .unwrap();
-        let cards = Cards::new().add(Op::Verify, "password");
-        let pipeline = config.compile_with(&cards).unwrap();
-        let node = pipeline.nodes().find(|node| node.id == "password").unwrap();
-        assert_eq!(node.args["source"], "company");
-    }
-
-    #[test]
-    fn rejects_unregistered_code() {
-        let config = PipelineConfig {
-            version: 1,
-            start: "verify".into(),
-            max_steps: None,
-            nodes: vec![NodeConfig {
-                id: "verify".into(),
-                op: Op::Verify,
-                code: Some("custom.card".into()),
-                fields: Vec::new(),
-                args: Value::Null,
-                edges: Vec::new(),
-                join: Join::All,
-                limit: None,
-                once: false,
-                timeout_ms: None,
-                retries: 0,
-                idempotency: None,
-            }],
-        };
-        assert!(config.compile_with(&Cards::new()).is_err());
-    }
 }
 
 impl Cards {
@@ -330,35 +274,211 @@ impl Cards {
 
     pub fn schema(&self) -> Value {
         let mut operations = serde_json::Map::new();
+        let mut variants = vec![json!({
+            "type": "object",
+            "properties": {
+                "id": { "type": "string", "minLength": 1 },
+                "type": { "const": "input" },
+                "fields": { "type": "array", "items": { "type": "string" } },
+                "join": { "enum": ["all", "any"] },
+                "limit": { "type": "integer", "minimum": 1 },
+                "once": { "type": "boolean" },
+                "timeout": { "type": "integer", "minimum": 1 },
+                "retries": { "type": "integer", "minimum": 0 },
+                "idempotency": { "type": "string", "minLength": 1 },
+                "edges": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "route": { "type": ["string", "null"] },
+                            "to": { "type": "string", "minLength": 1 }
+                        },
+                        "required": ["to"],
+                        "additionalProperties": false
+                    }
+                }
+            },
+            "required": ["id", "type"],
+            "additionalProperties": false
+        })];
         for (op, cards) in &self.values {
             let values = cards
                 .iter()
-                .map(|(code, card)| json!({ "code": code, "version": card.version, "args": card.args }))
+                .map(|(code, card)| {
+                    let args = self.card_schema_value(card);
+                    let mut required = vec![
+                        Value::String("id".into()),
+                        Value::String("type".into()),
+                        Value::String("code".into()),
+                    ];
+                    if !card.args.is_empty() {
+                        required.push(Value::String("args".into()));
+                    }
+                    variants.push(json!({
+                        "type": "object",
+                        "properties": {
+                            "id": { "type": "string", "minLength": 1 },
+                            "type": { "const": op_name(*op) },
+                            "code": { "const": code },
+                            "args": args,
+                            "edges": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "route": { "type": ["string", "null"] },
+                                        "to": { "type": "string", "minLength": 1 }
+                                    },
+                                    "required": ["to"],
+                                    "additionalProperties": false
+                                }
+                            },
+                            "fields": { "type": "array", "items": { "type": "string" } },
+                            "join": { "enum": ["all", "any"] },
+                            "limit": { "type": "integer", "minimum": 1 },
+                            "once": { "type": "boolean" },
+                            "timeout": { "type": "integer", "minimum": 1 },
+                            "retries": { "type": "integer", "minimum": 0 },
+                            "idempotency": { "type": "string", "minLength": 1 }
+                        },
+                        "required": required,
+                        "additionalProperties": false
+                    }));
+                    json!({
+                        "code": code,
+                        "version": card.version,
+                        "args": card.args,
+                        "schema": self.card_schema_value(card)
+                    })
+                })
                 .collect::<Vec<_>>();
-            operations.insert(format!("{op:?}").to_lowercase(), Value::Array(values));
+            operations.insert(op_name(*op).into(), Value::Array(values));
         }
-        json!({ "version": 1, "operations": operations })
+        json!({
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "version": 1,
+            "type": "object",
+            "properties": {
+                "version": { "type": "integer", "const": 1 },
+                "start": { "type": "string", "minLength": 1 },
+                "max_steps": { "type": "integer", "minimum": 1 },
+                "nodes": { "type": "array", "items": { "oneOf": variants } }
+            },
+            "required": ["start", "nodes"],
+            "additionalProperties": false,
+            "operations": operations
+        })
+    }
+
+    pub fn card_schema(&self, op: Op, code: &str) -> Option<Value> {
+        self.card(op, code).map(|card| self.card_schema_value(card))
+    }
+
+    fn card_schema_value(&self, card: &Card) -> Value {
+        let mut properties = serde_json::Map::new();
+        let mut required = Vec::new();
+        for (name, arg) in &card.args {
+            let mut schema = json_type(&arg.kind);
+            if arg.secret {
+                schema = json!({
+                    "type": "object",
+                    "properties": { "$secret": { "type": "string", "minLength": 1 } },
+                    "required": ["$secret"],
+                    "additionalProperties": false
+                });
+            }
+            properties.insert(name.clone(), schema);
+            if arg.required {
+                required.push(Value::String(name.clone()));
+            }
+        }
+        json!({
+            "type": "object",
+            "properties": properties,
+            "required": required,
+            "additionalProperties": false
+        })
     }
 
     pub fn validate(&self, config: &PipelineConfig) -> Result<()> {
+        if config.start.trim().is_empty() {
+            return Err(Error::Internal("Pipeline start node is empty".into()));
+        }
+        if config.max_steps == Some(0) {
+            return Err(Error::Internal(
+                "Pipeline max steps must be positive".into(),
+            ));
+        }
+        self.validate_cards()?;
+        let mut ids = BTreeMap::new();
         for node in &config.nodes {
+            if node.id.trim().is_empty() {
+                return Err(Error::Internal("Pipeline node id is empty".into()));
+            }
+            if ids.insert(node.id.clone(), ()).is_some() {
+                return Err(Error::Internal(format!(
+                    "Pipeline node id is duplicated: {}",
+                    node.id
+                )));
+            }
+            if node.limit == Some(0) {
+                return Err(Error::Internal(format!(
+                    "Pipeline node limit must be positive: {}",
+                    node.id
+                )));
+            }
+            if node.timeout == Some(0) {
+                return Err(Error::Internal(format!(
+                    "Pipeline timeout must be positive: {}",
+                    node.id
+                )));
+            }
+            if (node.once || node.idempotency.is_some()) && node.op != Op::Effect {
+                return Err(Error::Internal(format!(
+                    "Pipeline once/idempotency requires an effect node: {}",
+                    node.id
+                )));
+            }
+            validate_edges(node)?;
             if node.op == Op::Input {
                 continue;
             }
-            let code = node.code.as_deref().unwrap_or_default();
+            let code = node.code.as_deref().unwrap_or("");
+            if code.trim().is_empty() {
+                return Err(Error::Internal(format!(
+                    "Pipeline capability code is empty: {}",
+                    node.id
+                )));
+            }
             if !self.supports(node.op, code) {
-                return Err(IdpError::Internal(format!(
+                return Err(Error::Internal(format!(
                     "Pipeline capability is not registered: {:?}/{}",
                     node.op, code
                 )));
             }
             let card = self.card(node.op, code).expect("supports checked above");
-            for (field, arg) in &card.args {
-                if arg.required && node.args.get(field).is_none() {
-                    return Err(IdpError::Internal(format!(
-                        "Pipeline capability argument is missing: {:?}/{} -> {}",
-                        node.op, code, field
+            validate_args(node, card, code)?;
+        }
+        Ok(())
+    }
+
+    fn validate_cards(&self) -> Result<()> {
+        for (op, cards) in &self.values {
+            for (code, card) in cards {
+                if code.trim().is_empty() || card.version == 0 {
+                    return Err(Error::Internal(format!(
+                        "Invalid pipeline card: {:?}/{}",
+                        op, code
                     )));
+                }
+                for (name, arg) in &card.args {
+                    if name.trim().is_empty() || arg.kind.trim().is_empty() {
+                        return Err(Error::Internal(format!(
+                            "Invalid pipeline card argument: {:?}/{}",
+                            op, code
+                        )));
+                    }
                 }
             }
         }
@@ -371,21 +491,132 @@ impl Cards {
                 continue;
             }
             if !runner.supports(node) {
-                return Err(IdpError::Unsupported(node.id.clone()));
+                return Err(Error::Unsupported(node.id.clone()));
             }
             if let Some(code) = node_code(&node.kind) {
                 let op = node_op(&node.kind);
-                if let Some(card) = self.card(op, code) {
-                    if runner.version(node) != card.version {
-                        return Err(IdpError::Internal(format!(
-                            "Pipeline capability version mismatch: {:?}/{}",
-                            op, code
-                        )));
-                    }
+                if let Some(card) = self.card(op, code)
+                    && runner.version(node) != card.version
+                {
+                    return Err(Error::Internal(format!(
+                        "Pipeline capability version mismatch: {:?}/{}",
+                        op, code
+                    )));
                 }
             }
         }
         Ok(())
+    }
+}
+
+fn op_name(op: Op) -> &'static str {
+    match op {
+        Op::Input => "input",
+        Op::Check => "check",
+        Op::Issue => "issue",
+        Op::Verify => "verify",
+        Op::Effect => "effect",
+    }
+}
+
+fn json_type(kind: &str) -> Value {
+    match kind {
+        "string" | "number" | "integer" | "boolean" | "object" | "array" | "null" => {
+            json!({ "type": kind })
+        }
+        "any" => json!({}),
+        _ => json!({ "type": "string" }),
+    }
+}
+
+fn validate_edges(node: &NodeConfig) -> Result<()> {
+    let mut routes = BTreeMap::new();
+    for edge in &node.edges {
+        if edge.to.trim().is_empty() {
+            return Err(Error::Internal(format!(
+                "Pipeline edge target is empty: {}",
+                node.id
+            )));
+        }
+        if edge
+            .route
+            .as_deref()
+            .is_some_and(|route| route.trim().is_empty())
+        {
+            return Err(Error::Internal(format!(
+                "Pipeline edge route is empty: {}",
+                node.id
+            )));
+        }
+        if routes.insert(edge.route.clone(), ()).is_some() {
+            return Err(Error::Internal(format!(
+                "Pipeline edge route is duplicated: {}",
+                node.id
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_args(node: &NodeConfig, card: &Card, code: &str) -> Result<()> {
+    let args = match &node.args {
+        Value::Null => None,
+        Value::Object(values) => Some(values),
+        _ => {
+            return Err(Error::Internal(format!(
+                "Pipeline capability arguments must be an object: {}",
+                node.id
+            )));
+        }
+    };
+    for (field, value) in args.into_iter().flat_map(|values| values.iter()) {
+        let Some(arg) = card.args.get(field) else {
+            return Err(Error::Internal(format!(
+                "Pipeline capability argument is unknown: {:?}/{} -> {}",
+                node.op, code, field
+            )));
+        };
+        if arg.secret {
+            let valid = value
+                .get("$secret")
+                .and_then(Value::as_str)
+                .is_some_and(|key| !key.is_empty())
+                && value.as_object().is_some_and(|object| object.len() == 1);
+            if !valid {
+                return Err(Error::Internal(format!(
+                    "Pipeline secret argument is invalid: {:?}/{} -> {}",
+                    node.op, code, field
+                )));
+            }
+        } else if !matches_kind(value, &arg.kind) {
+            return Err(Error::Internal(format!(
+                "Pipeline capability argument has wrong type: {:?}/{} -> {}",
+                node.op, code, field
+            )));
+        }
+    }
+    for (field, arg) in &card.args {
+        if arg.required && args.is_none_or(|values| values.get(field).is_none()) {
+            return Err(Error::Internal(format!(
+                "Pipeline capability argument is missing: {:?}/{} -> {}",
+                node.op, code, field
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn matches_kind(value: &Value, kind: &str) -> bool {
+    match kind {
+        "string" => value.is_string(),
+        "number" => value.is_number(),
+        "integer" => value.as_i64().is_some() || value.as_u64().is_some(),
+        "boolean" => value.is_boolean(),
+        "object" => value.is_object(),
+        "array" => value.is_array(),
+        "null" => value.is_null(),
+        "any" => true,
+        _ => false,
     }
 }
 
@@ -406,5 +637,61 @@ fn node_op(kind: &super::Kind) -> Op {
         super::Kind::Issue(_) => Op::Issue,
         super::Kind::Verify(_) => Op::Verify,
         super::Kind::Effect(_) => Op::Effect,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compiles_page_config_and_checks_registered_cards() {
+        let config: PipelineConfig = serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "start": "input",
+            "nodes": [
+                {
+                    "id": "input",
+                    "type": "input",
+                    "fields": ["username", "password"],
+                    "edges": [{"to": "password"}]
+                },
+                {
+                    "id": "password",
+                    "type": "verify",
+                    "code": "password",
+                    "args": {"source": "company"}
+                }
+            ]
+        }))
+        .unwrap();
+        let cards = Cards::new().arg(Op::Verify, "password", "source", "string", true, false);
+        let pipeline = config.compile_with(&cards).unwrap();
+        let node = pipeline.nodes().find(|node| node.id == "password").unwrap();
+        assert_eq!(node.args["source"], "company");
+    }
+
+    #[test]
+    fn rejects_unregistered_code() {
+        let config = PipelineConfig {
+            version: 1,
+            start: "verify".into(),
+            max_steps: None,
+            nodes: vec![NodeConfig {
+                id: "verify".into(),
+                op: Op::Verify,
+                code: Some("custom.card".into()),
+                fields: Vec::new(),
+                args: Value::Null,
+                edges: Vec::new(),
+                join: Join::All,
+                limit: None,
+                once: false,
+                timeout: None,
+                retries: 0,
+                idempotency: None,
+            }],
+        };
+        assert!(config.compile_with(&Cards::new()).is_err());
     }
 }

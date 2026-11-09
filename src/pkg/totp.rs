@@ -1,4 +1,4 @@
-use crate::error::{IdpError, Result};
+use crate::error::{Error, Result};
 use hmac::{Hmac, Mac};
 use rand_core::{OsRng, RngCore};
 use sha1::Sha1;
@@ -44,7 +44,7 @@ fn base32_decode(encoded: &str) -> Result<Vec<u8>> {
             'A'..='Z' => (ch as u8) - b'A',
             '2'..='7' => (ch as u8) - b'2' + 26,
             _ => {
-                return Err(IdpError::AuthFailed(
+                return Err(Error::AuthFailed(
                     "Invalid Base32 character in TOTP secret".into(),
                 ));
             }
@@ -89,7 +89,7 @@ impl Totp {
     pub fn generate_otpauth_uri(issuer: &str, account: &str, secret: &str) -> Result<String> {
         let label = format!("{issuer}:{account}");
         let mut u = Url::parse(&format!("otpauth://totp/{label}"))
-            .map_err(|e| IdpError::Internal(e.to_string()))?;
+            .map_err(|e| Error::Internal(e.to_string()))?;
 
         u.query_pairs_mut()
             .append_pair("secret", secret)
@@ -104,7 +104,7 @@ impl Totp {
     /// 生成可供用户在 App 中扫码绑定的标准矢量 SVG 二维码内容
     pub fn generate_qr_svg(otpauth_uri: &str) -> Result<String> {
         let code = qrcode::QrCode::new(otpauth_uri.as_bytes())
-            .map_err(|e| IdpError::Internal(format!("二维码生成失败: {e}")))?;
+            .map_err(|e| Error::Internal(format!("二维码生成失败: {e}")))?;
 
         let svg = code
             .render::<qrcode::render::svg::Color>()
@@ -128,16 +128,16 @@ impl Totp {
         let step_bytes = step.to_be_bytes();
 
         let mut mac = HmacSha1::new_from_slice(&key_bytes)
-            .map_err(|e| IdpError::Internal(format!("HMAC key error: {e}")))?;
+            .map_err(|e| Error::Internal(format!("HMAC key error: {e}")))?;
         mac.update(&step_bytes);
         let result = mac.finalize().into_bytes();
 
         // 动态截断 Dynamic Truncation (RFC 4226)
         let offset = (result[19] & 0x0F) as usize;
         let binary = (((result[offset] & 0x7F) as u32) << 24)
-            | (((result[offset + 1] & 0xFF) as u32) << 16)
-            | (((result[offset + 2] & 0xFF) as u32) << 8)
-            | ((result[offset + 3] & 0xFF) as u32);
+            | ((result[offset + 1] as u32) << 16)
+            | ((result[offset + 2] as u32) << 8)
+            | (result[offset + 3] as u32);
 
         let code_num = binary % 10u32.pow(Self::DIGITS);
         Ok(format!("{:06}", code_num))
@@ -158,10 +158,10 @@ impl Totp {
         ];
 
         for t in steps {
-            if let Ok(expected) = Self::generate_code(secret, t) {
-                if expected == code {
-                    return Ok(true);
-                }
+            if let Ok(expected) = Self::generate_code(secret, t)
+                && expected == code
+            {
+                return Ok(true);
             }
         }
 

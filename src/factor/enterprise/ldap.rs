@@ -1,4 +1,4 @@
-use crate::error::{IdpError, Result};
+use crate::error::{Error, Result};
 use crate::types::Identity;
 use ldap3::{LdapConnAsync, Scope, SearchEntry, ldap_escape};
 use serde::{Deserialize, Serialize};
@@ -8,6 +8,7 @@ pub struct LdapConfig {
     pub server_url: String,
     pub base_dn: String,
     pub bind_dn: String,
+    #[serde(default, skip_serializing)]
     pub bind_password: Option<String>,
     pub user_search_filter: String,
 }
@@ -25,35 +26,35 @@ impl LdapAuth {
         password: &str,
     ) -> Result<Identity> {
         if username.trim().is_empty() || password.is_empty() {
-            return Err(IdpError::InvalidCredentials);
+            return Err(Error::InvalidCredentials);
         }
         let filter = config
             .user_search_filter
             .replace("{username}", ldap_escape(username).as_ref());
         if filter == config.user_search_filter {
-            return Err(IdpError::LdapError(
+            return Err(Error::LdapError(
                 "user_search_filter must contain {username}".into(),
             ));
         }
 
         let (conn, mut ldap) = LdapConnAsync::new(&config.server_url)
             .await
-            .map_err(|e| IdpError::LdapError(format!("connect failed: {e}")))?;
+            .map_err(|e| Error::LdapError(format!("connect failed: {e}")))?;
         ldap3::drive!(conn);
 
         if !config.bind_dn.is_empty() {
             let bind_password = config.bind_password.as_deref().unwrap_or_default();
             ldap.simple_bind(&config.bind_dn, bind_password)
                 .await
-                .map_err(|e| IdpError::LdapError(format!("service bind failed: {e}")))?
+                .map_err(|e| Error::LdapError(format!("service bind failed: {e}")))?
                 .success()
-                .map_err(|e| IdpError::LdapError(format!("service bind rejected: {e}")))?;
+                .map_err(|e| Error::LdapError(format!("service bind rejected: {e}")))?;
         } else {
             ldap.simple_bind("", "")
                 .await
-                .map_err(|e| IdpError::LdapError(format!("anonymous bind failed: {e}")))?
+                .map_err(|e| Error::LdapError(format!("anonymous bind failed: {e}")))?
                 .success()
-                .map_err(|e| IdpError::LdapError(format!("anonymous bind rejected: {e}")))?;
+                .map_err(|e| Error::LdapError(format!("anonymous bind rejected: {e}")))?;
         }
 
         let (entries, _) = ldap
@@ -64,19 +65,19 @@ impl LdapAuth {
                 vec!["uid", "mail", "telephoneNumber", "displayName", "cn"],
             )
             .await
-            .map_err(|e| IdpError::LdapError(format!("user search failed: {e}")))?
+            .map_err(|e| Error::LdapError(format!("user search failed: {e}")))?
             .success()
-            .map_err(|e| IdpError::LdapError(format!("user search rejected: {e}")))?;
+            .map_err(|e| Error::LdapError(format!("user search rejected: {e}")))?;
         if entries.len() != 1 {
-            return Err(IdpError::InvalidCredentials);
+            return Err(Error::InvalidCredentials);
         }
         let entry = SearchEntry::construct(entries.into_iter().next().unwrap());
         let user_dn = entry.dn.clone();
         ldap.simple_bind(&user_dn, password)
             .await
-            .map_err(|e| IdpError::LdapError(format!("user bind failed: {e}")))?
+            .map_err(|e| Error::LdapError(format!("user bind failed: {e}")))?
             .success()
-            .map_err(|_| IdpError::InvalidCredentials)?;
+            .map_err(|_| Error::InvalidCredentials)?;
         let _ = ldap.unbind().await;
 
         let subject = entry

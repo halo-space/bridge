@@ -5,7 +5,7 @@ use halo::factor::oidc;
 use halo::factor::passkey::Passkey;
 use halo::pkg::password::{Algorithm, Password};
 use halo::store::{Clients, Passkeys, Secrets, Users};
-use halo::types::{AuthUser, OAuthClient};
+use halo::types::{OAuthClient, User};
 use halo::validator::issuer::CaptchaIssuer;
 use halo::validator::verifier::captcha::{
     CaptchaType, CaptchaVerifier, CaptchaVerifyReq, ClickCaptcha, ImageCaptcha, RotateCaptcha,
@@ -124,7 +124,7 @@ fn test_rsa_crypto_decrypt() {
 
     // Test raw string fallback
     let raw = "admin123";
-    assert_eq!(RsaCrypto::decrypt_or_raw(raw), "admin123");
+    assert_eq!(RsaCrypto::decrypt_or_raw(raw).unwrap(), "admin123");
 }
 
 #[tokio::test]
@@ -262,9 +262,8 @@ fn test_token_issue_and_verify() {
         3600,
         86400,
     );
-    let user = AuthUser {
+    let user = User {
         id: 10001,
-        tenant_id: 1000000000000001,
         username: "admin".into(),
         email: Some("admin@halo.run".into()),
         phone: Some("13800000000".into()),
@@ -278,7 +277,6 @@ fn test_token_issue_and_verify() {
         .expect("issue tokens failed");
     let claims = service.verify_token(&access).expect("verify token failed");
     assert_eq!(claims.sub, "10001");
-    assert_eq!(claims.tenant_id, 1000000000000001);
     assert_eq!(claims.username, "admin");
 
     let refresh_claims = service
@@ -321,9 +319,8 @@ fn test_token_issue_and_verify_rs256_and_jwks() {
         &pub_pem_str,
     );
 
-    let user = AuthUser {
+    let user = User {
         id: 20002,
-        tenant_id: 1000000000000001,
         username: "rs256_user".into(),
         email: Some("rs256@halo.run".into()),
         phone: None,
@@ -414,50 +411,35 @@ struct MemSecrets {
 }
 
 struct MemClients {
-    tenant_id: i64,
     client: OAuthClient,
 }
 
 struct MemUsers {
-    user: AuthUser,
+    user: User,
 }
 
 struct MemPasskeys {
-    data: Mutex<Vec<(String, String, Passkey)>>,
+    data: Mutex<Vec<(String, Passkey)>>,
 }
 
 impl Clients for MemClients {
-    async fn find_client(
-        &self,
-        tenant_id: i64,
-        client_id: &str,
-    ) -> halo::Result<Option<OAuthClient>> {
-        Ok(
-            (self.tenant_id == tenant_id && self.client.client_id == client_id)
-                .then(|| self.client.clone()),
-        )
+    async fn find_client(&self, client_id: &str) -> halo::Result<Option<OAuthClient>> {
+        Ok((self.client.client_id == client_id).then(|| self.client.clone()))
     }
 }
 
 impl Users for MemUsers {
-    async fn find_by_username(
-        &self,
-        _tenant_id: i64,
-        _username: &str,
-    ) -> halo::Result<Option<AuthUser>> {
+    async fn find_by_username(&self, _username: &str) -> halo::Result<Option<User>> {
         Ok(None)
     }
-
-    async fn find_by_phone(&self, _tenant_id: i64, _phone: &str) -> halo::Result<Option<AuthUser>> {
+    async fn find_by_phone(&self, _phone: &str) -> halo::Result<Option<User>> {
         Ok(None)
     }
-
-    async fn find_by_email(&self, _tenant_id: i64, _email: &str) -> halo::Result<Option<AuthUser>> {
+    async fn find_by_email(&self, _email: &str) -> halo::Result<Option<User>> {
         Ok(None)
     }
-
-    async fn find_by_id(&self, tenant_id: i64, id: i64) -> halo::Result<Option<AuthUser>> {
-        Ok((self.user.tenant_id == tenant_id && self.user.id == id).then(|| self.user.clone()))
+    async fn find_by_id(&self, id: i64) -> halo::Result<Option<User>> {
+        Ok((self.user.id == id).then(|| self.user.clone()))
     }
 }
 
@@ -470,56 +452,53 @@ impl MemPasskeys {
 }
 
 impl Passkeys for MemPasskeys {
-    async fn save(&self, tenant: &str, subject: &str, passkey: Passkey) -> halo::Result<()> {
+    async fn save(&self, subject: &str, mut passkey: Passkey) -> halo::Result<()> {
         let mut data = self.data.lock().unwrap();
         if data
             .iter()
-            .any(|(_, _, stored)| stored.credential_id == passkey.credential_id)
+            .any(|(_, stored)| stored.credential_id == passkey.credential_id)
         {
-            return Err(halo::IdpError::StoreError(
+            return Err(halo::Error::StoreError(
                 "Credential ID already exists".into(),
             ));
         }
-        data.push((tenant.into(), subject.into(), passkey));
+        passkey.subject = subject.into();
+        data.push((subject.into(), passkey));
         Ok(())
     }
 
-    async fn find(&self, tenant: &str, credential_id: &str) -> halo::Result<Option<Passkey>> {
+    async fn find(&self, credential_id: &str) -> halo::Result<Option<Passkey>> {
         Ok(self
             .data
             .lock()
             .unwrap()
             .iter()
-            .find(|(stored_tenant, _, passkey)| {
-                stored_tenant == tenant && passkey.credential_id == credential_id
-            })
-            .map(|(_, _, passkey)| passkey.clone()))
+            .find(|(_, passkey)| passkey.credential_id == credential_id)
+            .map(|(_, passkey)| passkey.clone()))
     }
 
-    async fn list(&self, tenant: &str, subject: &str) -> halo::Result<Vec<Passkey>> {
+    async fn list(&self, subject: &str) -> halo::Result<Vec<Passkey>> {
         Ok(self
             .data
             .lock()
             .unwrap()
             .iter()
-            .filter(|(stored_tenant, stored_subject, _)| {
-                stored_tenant == tenant && stored_subject == subject
-            })
-            .map(|(_, _, passkey)| passkey.clone())
+            .filter(|(stored_subject, _)| stored_subject == subject)
+            .map(|(_, passkey)| passkey.clone())
             .collect())
     }
 
     async fn update(
         &self,
-        tenant: &str,
         credential_id: &str,
         old_count: u32,
         next: Passkey,
     ) -> halo::Result<bool> {
         let mut data = self.data.lock().unwrap();
-        let Some((_, _, passkey)) = data.iter_mut().find(|(stored_tenant, _, passkey)| {
-            stored_tenant == tenant && passkey.credential_id == credential_id
-        }) else {
+        let Some((_, passkey)) = data
+            .iter_mut()
+            .find(|(_, passkey)| passkey.credential_id == credential_id)
+        else {
             return Ok(false);
         };
         if passkey.sign_count != old_count
@@ -576,6 +555,7 @@ impl Secrets for MemSecrets {
 
 fn test_passkey(id: &str, sign_count: u32) -> Passkey {
     Passkey {
+        subject: "s1".into(),
         credential_id: id.into(),
         public_key: "key".into(),
         sign_count,
@@ -596,31 +576,25 @@ fn test_passkey(id: &str, sign_count: u32) -> Passkey {
 #[tokio::test]
 async fn test_passkey_store_scope_and_unique_id() {
     let store = MemPasskeys::new();
-    store
-        .save("t1", "s1", test_passkey("key-1", 1))
-        .await
-        .unwrap();
-    assert_eq!(store.list("t1", "s1").await.unwrap().len(), 1);
-    assert!(store.find("t1", "key-1").await.unwrap().is_some());
-    assert!(store.find("t2", "key-1").await.unwrap().is_none());
+    store.save("s1", test_passkey("key-1", 1)).await.unwrap();
+    assert_eq!(store.list("s1").await.unwrap().len(), 1);
+    assert!(store.find("key-1").await.unwrap().is_some());
+    assert!(store.list("s2").await.unwrap().is_empty());
 
-    let duplicate = store.save("t1", "s2", test_passkey("key-1", 1)).await;
+    let duplicate = store.save("s2", test_passkey("key-1", 1)).await;
     assert!(duplicate.is_err());
 }
 
 #[tokio::test]
 async fn test_passkey_counter_update_is_compare_and_set() {
     let store = Arc::new(MemPasskeys::new());
-    store
-        .save("t1", "s1", test_passkey("key-1", 1))
-        .await
-        .unwrap();
+    store.save("s1", test_passkey("key-1", 1)).await.unwrap();
 
     let left = store.clone();
     let right = store.clone();
     let (first, second) = tokio::join!(
-        left.update("t1", "key-1", 1, test_passkey("key-1", 2)),
-        right.update("t1", "key-1", 1, test_passkey("key-1", 3)),
+        left.update("key-1", 1, test_passkey("key-1", 2)),
+        right.update("key-1", 1, test_passkey("key-1", 3)),
     );
     assert_eq!(
         [first.unwrap(), second.unwrap()]
@@ -631,7 +605,7 @@ async fn test_passkey_counter_update_is_compare_and_set() {
     );
     assert!(
         !store
-            .update("t1", "key-1", 1, test_passkey("key-1", 4))
+            .update("key-1", 1, test_passkey("key-1", 4))
             .await
             .unwrap()
     );
@@ -753,7 +727,6 @@ async fn test_oidc_code_keeps_nonce_and_survives_failed_pkce() {
     let kv = MemSecrets::new();
     let (verifier, challenge) = oidc::Pkce::new();
     let clients = MemClients {
-        tenant_id: 2,
         client: OAuthClient {
             client_id: "web".into(),
             client_secret: None,
@@ -778,37 +751,36 @@ async fn test_oidc_code_keeps_nonce_and_survives_failed_pkce() {
     let mut bad_scope = authorize.clone();
     bad_scope.scope = Some("admin".into());
     assert!(
-        oidc::OidcFlow::validate_authorize_request(&clients, 2, &bad_scope)
+        oidc::OidcFlow::validate_authorize_request(&clients, &bad_scope)
             .await
             .is_err()
     );
     let mut bad_redirect = authorize.clone();
     bad_redirect.redirect_uri = "https://evil.example/callback".into();
     assert!(
-        oidc::OidcFlow::validate_authorize_request(&clients, 2, &bad_redirect)
+        oidc::OidcFlow::validate_authorize_request(&clients, &bad_redirect)
             .await
             .is_err()
     );
     let mut bad_method = authorize.clone();
     bad_method.code_challenge_method = Some("S512".into());
     assert!(
-        oidc::OidcFlow::validate_authorize_request(&clients, 2, &bad_method)
+        oidc::OidcFlow::validate_authorize_request(&clients, &bad_method)
             .await
             .is_err()
     );
-    oidc::OidcFlow::validate_authorize_request(&clients, 2, &authorize)
+    oidc::OidcFlow::validate_authorize_request(&clients, &authorize)
         .await
         .unwrap();
     assert!(
-        oidc::OidcFlow::validate_authorize_request(&clients, 3, &authorize)
+        oidc::OidcFlow::validate_authorize_request(&clients, &authorize)
             .await
-            .is_err()
+            .is_ok()
     );
     let code = oidc::OidcFlow::issue_code_with_nonce(
         &kv,
         "web",
         1,
-        2,
         &authorize.redirect_uri,
         "openid",
         authorize.code_challenge.clone(),
@@ -831,19 +803,19 @@ async fn test_oidc_code_keeps_nonce_and_survives_failed_pkce() {
     let mut bad_redirect_token = bad.clone();
     bad_redirect_token.redirect_uri = Some("https://evil.example/callback".into());
     assert!(
-        oidc::OidcFlow::exchange_code(&clients, 2, &kv, &bad_redirect_token)
+        oidc::OidcFlow::exchange_code(&clients, &kv, &bad_redirect_token)
             .await
             .is_err()
     );
     let mut bad_client = bad.clone();
     bad_client.client_id = "other".into();
     assert!(
-        oidc::OidcFlow::exchange_code(&clients, 2, &kv, &bad_client)
+        oidc::OidcFlow::exchange_code(&clients, &kv, &bad_client)
             .await
             .is_err()
     );
     assert!(
-        oidc::OidcFlow::exchange_code(&clients, 2, &kv, &bad)
+        oidc::OidcFlow::exchange_code(&clients, &kv, &bad)
             .await
             .is_err()
     );
@@ -852,12 +824,12 @@ async fn test_oidc_code_keeps_nonce_and_survives_failed_pkce() {
         code_verifier: Some(verifier),
         ..bad
     };
-    let exchanged = oidc::OidcFlow::exchange_code(&clients, 2, &kv, &good)
+    let exchanged = oidc::OidcFlow::exchange_code(&clients, &kv, &good)
         .await
         .unwrap();
     assert_eq!(exchanged.nonce.as_deref(), Some("nonce-1"));
     assert!(
-        oidc::OidcFlow::exchange_code(&clients, 2, &kv, &good)
+        oidc::OidcFlow::exchange_code(&clients, &kv, &good)
             .await
             .is_err()
     );
@@ -867,7 +839,6 @@ async fn test_oidc_code_keeps_nonce_and_survives_failed_pkce() {
 async fn test_oidc_refresh_rotates_and_revokes_old_token() {
     let kv = MemSecrets::new();
     let clients = MemClients {
-        tenant_id: 9,
         client: OAuthClient {
             client_id: "web".into(),
             client_secret: None,
@@ -880,9 +851,8 @@ async fn test_oidc_refresh_rotates_and_revokes_old_token() {
         },
     };
     let service = token::TokenService::new("refresh-secret-32-bytes-long-enough", "halo", 60, 600);
-    let user = AuthUser {
+    let user = User {
         id: 7,
-        tenant_id: 9,
         username: "user".into(),
         email: None,
         phone: None,
@@ -903,7 +873,7 @@ async fn test_oidc_refresh_rotates_and_revokes_old_token() {
     };
 
     let (_, next_refresh) =
-        oidc::OidcFlow::exchange_refresh_token(&clients, &users, 9, &service, &kv, &request)
+        oidc::OidcFlow::exchange_refresh_token(&clients, &users, &service, &kv, &request)
             .await
             .unwrap();
     assert_ne!(refresh, next_refresh);
@@ -913,7 +883,7 @@ async fn test_oidc_refresh_rotates_and_revokes_old_token() {
             .unwrap()
     );
     assert!(
-        oidc::OidcFlow::exchange_refresh_token(&clients, &users, 9, &service, &kv, &request)
+        oidc::OidcFlow::exchange_refresh_token(&clients, &users, &service, &kv, &request)
             .await
             .is_err()
     );
@@ -930,13 +900,12 @@ async fn test_oidc_refresh_rotates_and_revokes_old_token() {
         oidc::OidcFlow::exchange_refresh_token(
             &clients,
             &inactive_users,
-            9,
             &service,
             &kv,
             &inactive_request,
         )
         .await,
-        Err(halo::IdpError::UserDisabled)
+        Err(halo::Error::UserDisabled)
     ));
 }
 
@@ -1058,9 +1027,8 @@ fn test_totp_and_recovery_codes() {
 fn test_custom_claims_token_injection() {
     let service =
         halo::token::TokenService::new("my-32-byte-secret-key-1234567890", "halo-idp", 3600, 86400);
-    let user = AuthUser {
+    let user = User {
         id: 20001,
-        tenant_id: 1000000000000001,
         username: "developer".into(),
         email: Some("dev@halo.run".into()),
         phone: None,
@@ -1097,9 +1065,7 @@ async fn test_passkey_fixture_register_request_verify() {
         "Halo",
     )
     .unwrap();
-    let start = webauthn
-        .issue("00000000-0000-0000-0000-000000000001", "user", "User")
-        .unwrap();
+    let start = webauthn.issue("employee:42", "user", "User").unwrap();
     let mut state: serde_json::Value = serde_json::from_str(&start.state).unwrap();
     state["state"]["rs"]["challenge"] =
         serde_json::Value::String("FQky0FqnmV5KYqFU96E9aApSIRtjXiKcVFUf8Am8iDQ".into());
@@ -1121,9 +1087,9 @@ async fn test_passkey_fixture_register_request_verify() {
     assert!(registered.data.is_some());
 
     let store = MemPasskeys::new();
-    store.save("t1", "s1", registered).await.unwrap();
+    store.save("s1", registered).await.unwrap();
     let stored = store
-        .find("t1", "KwlEDOBCBc9P1YU3NWihYLCeY-I9KGMhPap9vwHbVoI")
+        .find("KwlEDOBCBc9P1YU3NWihYLCeY-I9KGMhPap9vwHbVoI")
         .await
         .unwrap()
         .unwrap();
@@ -1162,7 +1128,7 @@ async fn test_passkey_fixture_register_request_verify() {
     );
 
     let mut next = store
-        .find("t1", "KwlEDOBCBc9P1YU3NWihYLCeY-I9KGMhPap9vwHbVoI")
+        .find("KwlEDOBCBc9P1YU3NWihYLCeY-I9KGMhPap9vwHbVoI")
         .await
         .unwrap()
         .unwrap();
@@ -1173,12 +1139,12 @@ async fn test_passkey_fixture_register_request_verify() {
     next.data = result.data.clone();
     assert!(
         store
-            .update("t1", "KwlEDOBCBc9P1YU3NWihYLCeY-I9KGMhPap9vwHbVoI", 0, next,)
+            .update("KwlEDOBCBc9P1YU3NWihYLCeY-I9KGMhPap9vwHbVoI", 0, next,)
             .await
             .unwrap()
     );
     let updated = store
-        .find("t1", "KwlEDOBCBc9P1YU3NWihYLCeY-I9KGMhPap9vwHbVoI")
+        .find("KwlEDOBCBc9P1YU3NWihYLCeY-I9KGMhPap9vwHbVoI")
         .await
         .unwrap()
         .unwrap();

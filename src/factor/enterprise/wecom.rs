@@ -1,18 +1,21 @@
-use crate::error::{IdpError, Result};
+use crate::error::{Error, Result};
 use crate::types::Identity;
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 use url::Url;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WecomConfig {
     pub corp_id: String,
     pub agent_id: String,
+    #[serde(default, skip_serializing)]
     pub corp_secret: String,
 }
 
 pub struct WecomProvider {
     config: WecomConfig,
     endpoint: String,
+    timeout: Duration,
 }
 
 impl WecomProvider {
@@ -20,6 +23,7 @@ impl WecomProvider {
         Self {
             config,
             endpoint: "https://qyapi.weixin.qq.com".into(),
+            timeout: crate::pkg::http::DEFAULT_TIMEOUT,
         }
     }
 
@@ -28,10 +32,15 @@ impl WecomProvider {
         self
     }
 
+    pub fn timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout.max(Duration::from_secs(1));
+        self
+    }
+
     /// 构造企业微信 Web 扫码授权或企业微信内静默授权链接
     pub fn get_authorize_url(&self, state: &str, redirect_uri: &str) -> Result<String> {
         let mut u = Url::parse("https://open.work.weixin.qq.com/wwopen/sso/qrConnect")
-            .map_err(|e| IdpError::Internal(e.to_string()))?;
+            .map_err(|e| Error::Internal(e.to_string()))?;
 
         u.query_pairs_mut()
             .append_pair("appid", &self.config.corp_id)
@@ -44,7 +53,7 @@ impl WecomProvider {
 
     /// 使用 code 换取企微内部成员 userid
     pub async fn exchange_code_for_user(&self, code: &str) -> Result<serde_json::Value> {
-        let http = reqwest::Client::new();
+        let http = crate::pkg::http::client(self.timeout)?;
 
         // 1. 获取 access_token
         let token_url = format!(
@@ -53,21 +62,24 @@ impl WecomProvider {
             self.config.corp_id,
             self.config.corp_secret
         );
-        let token_resp =
-            http.get(&token_url).send().await.map_err(|e| {
-                IdpError::OAuthError(format!("WeCom access_token network error: {e}"))
-            })?;
+        let token_resp = http
+            .get(&token_url)
+            .send()
+            .await
+            .map_err(|e| Error::OAuthError(format!("WeCom access_token network error: {e}")))?;
 
         let token_json: serde_json::Value = token_resp
+            .error_for_status()
+            .map_err(|e| Error::OAuthError(format!("WeCom token HTTP error: {e}")))?
             .json()
             .await
-            .map_err(|e| IdpError::OAuthError(format!("Invalid WeCom token JSON: {e}")))?;
+            .map_err(|e| Error::OAuthError(format!("Invalid WeCom token JSON: {e}")))?;
 
         let access_token = token_json["access_token"].as_str().ok_or_else(|| {
             let err = token_json["errmsg"]
                 .as_str()
                 .unwrap_or("missing access_token");
-            IdpError::OAuthError(format!("WeCom token error: {err}"))
+            Error::OAuthError(format!("WeCom token error: {err}"))
         })?;
 
         // 2. 根据 code 获取 user_info
@@ -81,12 +93,14 @@ impl WecomProvider {
             .get(&user_url)
             .send()
             .await
-            .map_err(|e| IdpError::OAuthError(format!("WeCom user_info network error: {e}")))?;
+            .map_err(|e| Error::OAuthError(format!("WeCom user_info network error: {e}")))?;
 
         let user_json: serde_json::Value = user_resp
+            .error_for_status()
+            .map_err(|e| Error::OAuthError(format!("WeCom user HTTP error: {e}")))?
             .json()
             .await
-            .map_err(|e| IdpError::OAuthError(format!("Invalid WeCom user JSON: {e}")))?;
+            .map_err(|e| Error::OAuthError(format!("Invalid WeCom user JSON: {e}")))?;
 
         Ok(user_json)
     }
@@ -96,7 +110,7 @@ impl WecomProvider {
             .get("UserId")
             .or_else(|| value.get("userid"))
             .and_then(|v| v.as_str())
-            .ok_or_else(|| IdpError::AuthFailed("WeCom identity is missing subject".into()))?;
+            .ok_or_else(|| Error::AuthFailed("WeCom identity is missing subject".into()))?;
         let mut identity = Identity::new("wecom", subject);
         if let Some(email) = value.get("email").and_then(|v| v.as_str()) {
             identity = identity.email(email);

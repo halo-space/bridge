@@ -1,8 +1,8 @@
-use halo::bridge::{AuthUser, Events, IdpError, TotpBinding};
 use halo::bridge::{
     CaptchaType, CaptchaVerifyReq, Context, Device, Devices, Event, Factors, Node,
     NotificationService, Passkeys, Pipeline, Progress, Secrets, Services, Users,
 };
+use halo::bridge::{Error, Events, TotpBinding, User};
 use halo::bridge::{SmsConfig, SmsSender, SmtpConfig, SmtpSender};
 use halo::factor::passkey::Passkey;
 use halo::pkg::totp::Totp;
@@ -54,37 +54,24 @@ impl Secrets for Mem {
 
 #[derive(Clone)]
 struct UserMem {
-    user: AuthUser,
+    user: User,
 }
 
 impl Users for UserMem {
-    async fn find_by_username(
-        &self,
-        tenant_id: i64,
-        username: &str,
-    ) -> halo::Result<Option<AuthUser>> {
-        Ok(
-            (self.user.tenant_id == tenant_id && self.user.username == username)
-                .then(|| self.user.clone()),
-        )
+    async fn find_by_username(&self, username: &str) -> halo::Result<Option<User>> {
+        Ok((self.user.username == username).then(|| self.user.clone()))
     }
 
-    async fn find_by_phone(&self, tenant_id: i64, phone: &str) -> halo::Result<Option<AuthUser>> {
-        Ok(
-            (self.user.tenant_id == tenant_id && self.user.phone.as_deref() == Some(phone))
-                .then(|| self.user.clone()),
-        )
+    async fn find_by_phone(&self, phone: &str) -> halo::Result<Option<User>> {
+        Ok((self.user.phone.as_deref() == Some(phone)).then(|| self.user.clone()))
     }
 
-    async fn find_by_email(&self, tenant_id: i64, email: &str) -> halo::Result<Option<AuthUser>> {
-        Ok(
-            (self.user.tenant_id == tenant_id && self.user.email.as_deref() == Some(email))
-                .then(|| self.user.clone()),
-        )
+    async fn find_by_email(&self, email: &str) -> halo::Result<Option<User>> {
+        Ok((self.user.email.as_deref() == Some(email)).then(|| self.user.clone()))
     }
 
-    async fn find_by_id(&self, tenant_id: i64, id: i64) -> halo::Result<Option<AuthUser>> {
-        Ok((self.user.tenant_id == tenant_id && self.user.id == id).then(|| self.user.clone()))
+    async fn find_by_id(&self, id: i64) -> halo::Result<Option<User>> {
+        Ok((self.user.id == id).then(|| self.user.clone()))
     }
 }
 
@@ -94,7 +81,7 @@ struct FactorMem {
 }
 
 impl Factors for FactorMem {
-    async fn find_totp(&self, _tenant_id: i64, _user_id: i64) -> halo::Result<Option<TotpBinding>> {
+    async fn find_totp(&self, _user_id: i64) -> halo::Result<Option<TotpBinding>> {
         Ok(Some(self.binding.clone()))
     }
 }
@@ -103,26 +90,25 @@ impl Factors for FactorMem {
 struct PasskeyMem;
 
 impl Passkeys for PasskeyMem {
-    async fn save(&self, _tenant: &str, _subject: &str, _passkey: Passkey) -> halo::Result<()> {
-        Err(IdpError::Internal("unused in this test".into()))
+    async fn save(&self, _subject: &str, _passkey: Passkey) -> halo::Result<()> {
+        Err(Error::Internal("unused in this test".into()))
     }
 
-    async fn find(&self, _tenant: &str, _credential_id: &str) -> halo::Result<Option<Passkey>> {
-        Err(IdpError::Internal("unused in this test".into()))
+    async fn find(&self, _credential_id: &str) -> halo::Result<Option<Passkey>> {
+        Err(Error::Internal("unused in this test".into()))
     }
 
-    async fn list(&self, _tenant: &str, _subject: &str) -> halo::Result<Vec<Passkey>> {
-        Err(IdpError::Internal("unused in this test".into()))
+    async fn list(&self, _subject: &str) -> halo::Result<Vec<Passkey>> {
+        Err(Error::Internal("unused in this test".into()))
     }
 
     async fn update(
         &self,
-        _tenant: &str,
         _credential_id: &str,
         _old_count: u32,
         _passkey: Passkey,
     ) -> halo::Result<bool> {
-        Err(IdpError::Internal("unused in this test".into()))
+        Err(Error::Internal("unused in this test".into()))
     }
 }
 
@@ -149,13 +135,13 @@ impl Devices for DeviceMem {
         Ok(())
     }
 
-    async fn find(&self, tenant_id: i64, device_id: &str) -> halo::Result<Option<Device>> {
+    async fn find(&self, device_id: &str) -> halo::Result<Option<Device>> {
         Ok(self
             .device
             .lock()
             .unwrap()
             .clone()
-            .filter(|device| device.tenant_id == tenant_id && device.id == device_id))
+            .filter(|device| device.id == device_id))
     }
 
     async fn update(&self, device: Device) -> halo::Result<bool> {
@@ -163,13 +149,13 @@ impl Devices for DeviceMem {
         Ok(true)
     }
 
-    async fn revoke(&self, tenant_id: i64, device_id: &str) -> halo::Result<bool> {
+    async fn revoke(&self, device_id: &str) -> halo::Result<bool> {
         let mut stored = self.device.lock().unwrap();
-        if let Some(device) = stored.as_mut() {
-            if device.tenant_id == tenant_id && device.id == device_id {
-                device.revoke();
-                return Ok(true);
-            }
+        if let Some(device) = stored.as_mut()
+            && device.id == device_id
+        {
+            device.revoke();
+            return Ok(true);
         }
         Ok(false)
     }
@@ -177,7 +163,7 @@ impl Devices for DeviceMem {
 
 fn services(
     secrets: Mem,
-    user: AuthUser,
+    user: User,
     factors: FactorMem,
     events: EventMem,
 ) -> Services<Mem, UserMem, FactorMem, PasskeyMem, EventMem, DeviceMem> {
@@ -196,10 +182,9 @@ fn services(
     )
 }
 
-fn user() -> AuthUser {
-    AuthUser {
+fn user() -> User {
+    User {
         id: 7,
-        tenant_id: 1,
         username: "alice".into(),
         email: Some("alice@example.com".into()),
         phone: Some("13800138000".into()),
@@ -244,7 +229,6 @@ async fn pipeline_runs_captcha_sms_and_audit_without_node_dispatch_in_app() {
 
     let (mut run, progress) = pipeline
         .start(Context {
-            tenant_id: 1,
             ..Context::default()
         })
         .unwrap();
@@ -335,7 +319,6 @@ async fn pipeline_runs_totp_and_password_verifiers() {
     let pipeline = Pipeline::new("totp", vec![Node::verify("totp", "totp")]);
     let (mut run, _) = pipeline
         .start(Context {
-            tenant_id: 1,
             ..Context::default()
         })
         .unwrap();

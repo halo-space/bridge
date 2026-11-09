@@ -1,4 +1,4 @@
-use crate::error::{IdpError, Result};
+use crate::error::{Error, Result};
 use base64::Engine;
 use base64::prelude::BASE64_STANDARD;
 use rand_core::OsRng;
@@ -23,11 +23,11 @@ impl RsaCrypto {
     pub fn new() -> Result<Self> {
         let mut rng = OsRng;
         let private_key = RsaPrivateKey::new(&mut rng, 2048)
-            .map_err(|e| IdpError::Internal(format!("Failed to generate RSA private key: {e}")))?;
+            .map_err(|e| Error::Internal(format!("Failed to generate RSA private key: {e}")))?;
         let public_key = RsaPublicKey::from(&private_key);
         let public_key_pem = public_key
             .to_public_key_pem(LineEnding::LF)
-            .map_err(|e| IdpError::Internal(format!("Failed to export RSA public key: {e}")))?;
+            .map_err(|e| Error::Internal(format!("Failed to export RSA public key: {e}")))?;
 
         Ok(Self {
             private_key,
@@ -39,11 +39,11 @@ impl RsaCrypto {
     /// 从 PKCS#8 PEM 恢复密钥，供调用方持久化和启动加载。
     pub fn from_private_pem(pem: &str) -> Result<Self> {
         let private_key = RsaPrivateKey::from_pkcs8_pem(pem)
-            .map_err(|e| IdpError::Internal(format!("Failed to load RSA private key: {e}")))?;
+            .map_err(|e| Error::Internal(format!("Failed to load RSA private key: {e}")))?;
         let public_key = RsaPublicKey::from(&private_key);
         let public_key_pem = public_key
             .to_public_key_pem(LineEnding::LF)
-            .map_err(|e| IdpError::Internal(format!("Failed to export RSA public key: {e}")))?;
+            .map_err(|e| Error::Internal(format!("Failed to export RSA public key: {e}")))?;
         Ok(Self {
             private_key,
             public_key,
@@ -56,7 +56,7 @@ impl RsaCrypto {
         self.private_key
             .to_pkcs8_pem(LineEnding::LF)
             .map(|pem| pem.to_string())
-            .map_err(|e| IdpError::Internal(format!("Failed to export RSA private key: {e}")))
+            .map_err(|e| Error::Internal(format!("Failed to export RSA private key: {e}")))
     }
 
     /// 生成新密钥，用于显式轮换。
@@ -84,32 +84,31 @@ impl RsaCrypto {
     pub fn decrypt_oaep(&self, base64_ciphertext: &str) -> Result<String> {
         let ciphertext = BASE64_STANDARD
             .decode(base64_ciphertext.trim())
-            .map_err(|e| IdpError::AuthFailed(format!("Invalid base64 payload: {e}")))?;
+            .map_err(|e| Error::AuthFailed(format!("Invalid base64 payload: {e}")))?;
 
         let padding = Oaep::new::<Sha256>();
         let decrypted_bytes = self
             .private_key
             .decrypt(padding, &ciphertext)
-            .map_err(|e| IdpError::AuthFailed(format!("RSA decryption failed: {e}")))?;
+            .map_err(|e| Error::AuthFailed(format!("RSA decryption failed: {e}")))?;
 
         String::from_utf8(decrypted_bytes)
-            .map_err(|e| IdpError::AuthFailed(format!("Decrypted bytes not valid UTF-8: {e}")))
+            .map_err(|e| Error::AuthFailed(format!("Decrypted bytes not valid UTF-8: {e}")))
     }
 
-    /// 智能解密：如果为 Base64 密文且解密成功则返回解密后的明文；若解密失败或不是密文则原样返回
-    pub fn decrypt_or_raw(input: &str) -> String {
+    /// 解密可能来自前端的 RSA 密文；短输入按原始值返回，疑似密文解密失败直接报错。
+    pub fn decrypt_or_raw(input: &str) -> Result<String> {
         let trimmed = input.trim();
-        // RSA-2048 Base64 密文通常为 344 字符或以上
+        // RSA-2048 Base64 密文通常为 344 字符或以上。
         if trimmed.len() >= 128 {
-            if let Ok(plain) = Self::global().decrypt_oaep(trimmed) {
-                // 如果前端附带了时间戳防重放，例如 "plainPassword:::1730356800000"
-                if let Some((raw_pwd, _ts)) = plain.split_once(":::") {
-                    return raw_pwd.to_string();
-                }
-                return plain;
+            let plain = Self::global().decrypt_oaep(trimmed)?;
+            // 如果前端附带了时间戳防重放，例如 "plainPassword:::1730356800000"
+            if let Some((raw_pwd, _ts)) = plain.split_once(":::") {
+                return Ok(raw_pwd.to_string());
             }
+            return Ok(plain);
         }
-        input.to_string()
+        Ok(input.to_string())
     }
 }
 

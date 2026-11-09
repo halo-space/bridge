@@ -27,32 +27,22 @@ impl NotificationService {
         }
     }
 
-    /// 根据接收方特征判断通道类型 (包含 '@' 判定为邮件，否则判定为手机短信)
-    pub fn detect_channel(target: &str) -> NotifyChannel {
-        if target.contains('@') {
-            NotifyChannel::Email
-        } else {
-            NotifyChannel::Sms
-        }
-    }
-
-    /// 目标通道是否处于激活可用状态
-    pub fn is_active_for(&self, target: &str) -> bool {
-        match Self::detect_channel(target) {
+    pub fn is_active(&self, channel: NotifyChannel) -> bool {
+        match channel {
             NotifyChannel::Email => self.mailer.is_active(),
             NotifyChannel::Sms => self.sms.is_active(),
         }
     }
 
-    /// 统一异步投递验证码
-    pub async fn send_verification_code(
+    pub async fn send_code(
         &self,
+        channel: NotifyChannel,
         target: &str,
         code: &str,
         scene: &str,
         ttl_seconds: u64,
     ) -> Result<()> {
-        match Self::detect_channel(target) {
+        match channel {
             NotifyChannel::Email => {
                 self.mailer
                     .send_verification_code(target, code, scene, ttl_seconds)
@@ -87,23 +77,23 @@ mod tests {
         let sms = SmsSender::new(SmsConfig::default());
         let notify = NotificationService::new(mailer, sms);
 
-        assert_eq!(
-            NotificationService::detect_channel("user@halo.com"),
-            NotifyChannel::Email
-        );
-        assert_eq!(
-            NotificationService::detect_channel("+8613800138000"),
-            NotifyChannel::Sms
-        );
+        assert!(notify.is_active(NotifyChannel::Email) == notify.mailer().is_active());
+        assert!(notify.is_active(NotifyChannel::Sms) == notify.sms().is_active());
 
         // 未配置真实发信网关时平滑降级，返回 Ok(())
         let res_mail = notify
-            .send_verification_code("test@halo.com", "123456", "login", 300)
+            .send_code(
+                NotifyChannel::Email,
+                "test@halo.com",
+                "123456",
+                "login",
+                300,
+            )
             .await;
         assert!(res_mail.is_ok());
 
         let res_sms = notify
-            .send_verification_code("13800138000", "123456", "login", 300)
+            .send_code(NotifyChannel::Sms, "13800138000", "123456", "login", 300)
             .await;
         assert!(res_sms.is_ok());
     }

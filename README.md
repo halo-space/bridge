@@ -6,8 +6,10 @@ Bridge 是一个面向企业身份认证的 Rust 能力库。它提供基础登�
 
 ```toml
 [dependencies]
-halo = { package = "halo-bridge", version = "0.3" }
+halo = { package = "halo-bridge", version = "0.4" }
 ```
+
+默认启用 `full` feature。只需要核心 Pipeline、类型和算法时，可以使用 `default-features = false`；邮件、短信、社交、企业和 Passkey 能力分别由 `mail`、`sms`、`social`、`enterprise`、`passkey` feature 控制。
 
 ```rust
 use halo::bridge::{Context, Node, Pipeline};
@@ -25,17 +27,25 @@ src/
 │   ├── enterprise/         # LDAP、SAML、企业微信、钉钉
 │   ├── oidc/               # 外部 OIDC Provider 和 OAuth/OIDC 流程
 │   │   └── provider/       # 外部 OIDC 身份源
-│   └── passkey.rs          # 持久化 Passkey 数据模型
+│   └── passkey.rs          # Passkey 因子入口
 ├── validator/              # 认证材料的签发、发送和校验
 │   ├── issuer/
 │   ├── sender/
+│   │   └── sms/          # 短信门面、阿里云、腾讯云和未知供应商错误适配
 │   └── verifier/
 ├── types/                  # 身份、认证结果、用户、OAuth、因子模型
+│   ├── passkey.rs          # 持久化 Passkey 模型
+│   └── device.rs           # 持久化 Device 模型
 ├── store/                  # 按能力拆分的存储契约
 ├── token/                  # Claims、JWT 服务和 JWKS
 ├── rules/                  # 密码、锁定、重认证规则
 ├── pkg/                    # 密码、TOTP、恢复码、RSA 等算法
-├── pipeline.rs             # 统一登录前、中、后的节点 DAG 和内置执行绑定
+├── pipeline/               # 统一登录前、中、后的节点 DAG 和内置执行绑定
+│   ├── model.rs            # 节点、上下文、事件和 Runner 契约
+│   ├── run.rs              # 可恢复运行状态和进度
+│   ├── engine.rs           # 图调度、汇聚、重试和执行
+│   ├── config.rs           # 配置编译、能力卡片和 Schema
+│   └── services/           # 按能力拆分的内置 Runner
 ├── audit.rs                # 安全审计事件模型
 ├── risk.rs                 # 风险评分和阻断决策
 └── error.rs                # 统一错误类型
@@ -109,7 +119,7 @@ Pipeline 的 `Services` 是 bridge 提供的可选默认适配器，不是能力
 
 页面配置通过 `PipelineConfig` 编译，并使用 `Cards` 校验固定能力码；自定义能力例如 `custom.card` 必须先注册。节点的 `args` 会传给用户自己的 `Runner`。
 
-`Cards::schema()` 可生成页面编辑器使用的能力 Schema；敏感配置使用 `secret("...")` 保存引用，真实密钥由应用层解析。
+`Cards::schema()` 可生成页面编辑器使用的 JSON Schema、能力码和每个 Card 的参数 Schema；编译时会校验参数类型、未知参数和 Secret 引用。敏感配置使用 `secret("...")` 保存引用，真实密钥由应用层解析。
 
 发布配置后可以调用 `Cards::validate_runner` 检查实际 Runner 是否支持所有能力和版本。
 
@@ -128,7 +138,7 @@ Magic Link 的无存储签名接口只负责签名校验。需要单次消费时
 OIDC 相关代码位于 `factor/oidc`：
 
 - `flow.rs` 负责授权码、客户端、scope、redirect URI、PKCE 和 Refresh Token
-- OIDC 流程调用必须显式传入租户上下文，客户端与授权码不会跨租户读取
+- OIDC 流程只处理协议校验和临时凭证；客户端、授权码和业务命名空间由调用方提供
 - `state.rs`、`nonce.rs`、`pkce.rs` 负责流程参数生成和校验
 - `server.rs` 负责 Discovery、撤销和响应模型
 - `provider/` 负责外部 OIDC Claims 到 `Identity` 的转换
