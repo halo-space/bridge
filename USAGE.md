@@ -4,12 +4,14 @@
 
 ## 1. 安装
 
+在应用的 `Cargo.toml` 中使用包名 `halo-bridge`，代码中的库名仍然是 `halo`：
+
 ```toml
 [dependencies]
 halo = { package = "halo-bridge", version = "0.4" }
 ```
 
-统一入口：
+业务代码通常从统一入口导入 bridge 的公共类型：
 
 ```rust
 use halo::bridge::*;
@@ -23,6 +25,8 @@ halo = { package = "halo-bridge", version = "0.4", default-features = false }
 ```
 
 可选 feature 是 `mail`、`sms`、`social`、`enterprise` 和 `passkey`，`full` 会一次启用全部能力。
+
+关闭默认 feature 后，未启用的模块不会参与编译；例如没有 `sms` feature 时，短信 sender 类型不可用。
 
 ## 2. 先明确边界
 
@@ -66,6 +70,8 @@ Pipeline 是登录流程图。它只知道节点、边、路由、汇聚、重�
   → 验证码 verifier
 ```
 
+这里的箭头表示节点之间的执行顺序：用户输入由调用方提交，Pipeline 再把数据传给下一个节点；每个节点的具体实现由 issuer、sender 或 verifier 完成。
+
 ### 3.3 Cards、Services、Runner
 
 - `Cards` 是配置注册表，描述某个 `type/code` 是否存在、需要哪些参数以及参数类型。
@@ -99,6 +105,8 @@ pub trait Devices {}  // Device 保存、更新和撤销
 pub trait Events {}   // 审计事件写入
 pub trait Limits {}   // 发送和校验频控
 ```
+
+例如，账号密码节点会调用 `Users`，短信验证码节点会调用 `Secrets`，TOTP 节点会调用 `Factors`，审计节点会调用 `Events`。这些接口只定义 bridge 需要什么数据，不规定调用方如何建表或如何使用 Redis。
 
 这些 trait 不是数据库实现。调用方需要自行处理：
 
@@ -190,7 +198,7 @@ let cards = cards.add(Op::Verify, "custom.employee_card");
 
 ### 第三步：保存并编译 PipelineConfig
 
-调用方可以把下面的 JSON 保存到数据库的登录方式配置中：
+调用方可以把下面的 JSON 保存到数据库的登录方式配置中。这个 JSON 是“登录流程”，不是 `Cards` 能力表：
 
 ```json
 {
@@ -222,6 +230,17 @@ let cards = cards.add(Op::Verify, "custom.employee_card");
 }
 ```
 
+字段含义：
+
+- `version`：配置格式版本。
+- `start`：第一次进入的节点 ID。
+- `max_steps`：单次认证最多推进多少步。
+- `nodes`：登录节点列表。
+- `type`：节点职责，例如 `input`、`verify`、`issue`、`effect`。
+- `code`：该职责使用的能力码，例如 `password`、`sms.send`。
+- `args`：传给能力实现的页面参数。
+- `edges`：当前节点完成后去哪里。
+
 编译时校验配置：
 
 ```rust
@@ -233,6 +252,8 @@ let pipeline: Pipeline = config.compile_with(&cards)?;
 // 这里只检查兼容性，不执行登录；真正执行使用 pipeline.run(...)。
 cards.run(&pipeline, &runner)?;
 ```
+
+`serde_json::from_str` 只负责把 JSON 读成 Rust 配置；`compile_with` 才会检查能力码、参数、节点 ID、边和回边；`cards.run` 再检查实际 Runner 是否支持这些能力。三个步骤都成功后，配置才适合发布。
 
 配置发布后会生成版本和 hash。恢复旧 Run 时必须使用相同配置；新发布的配置不会接管已经开始的认证流程。
 
@@ -251,6 +272,8 @@ let services = Services::new(
     notifications,
 );
 ```
+
+参数按顺序对应：临时材料、用户、TOTP、Passkey、审计事件、Device 和通知服务。`Services` 不创建这些依赖，只保存调用方传入的实现。
 
 如果某一步必须使用公司自己的账号系统、风控系统或验证码服务，就实现 `Runner`：
 
@@ -271,11 +294,15 @@ impl Runner for CompanyRunner {
 }
 ```
 
+这个 Runner 做了三件事：读取当前节点输入、调用调用方自己的账号系统、返回一个统一的 `Identity`。它没有把用户写入 bridge，也没有创建 Session。
+
 保留默认能力，同时覆盖一部分节点：
 
 ```rust
 let runner = Fallback::new(CompanyRunner, services);
 ```
+
+这里的第一个参数优先处理节点；只有它返回 `Unsupported`，才由第二个参数处理。账号密码可以交给公司 Runner，短信、TOTP 和审计仍然交给默认 Services。
 
 `Fallback` 会先调用自己的 Runner；只有返回 `Error::Unsupported` 时才交给后面的 Runner。
 
@@ -293,6 +320,8 @@ let context = Context {
 let (mut run, progress) = pipeline.start(context)?;
 ```
 
+`Context` 是本次认证的请求上下文。`protocol` 和 `connection` 是调用方传入的业务信息；`start` 会创建短期 `Run`，并返回当前需要处理的第一个节点。
+
 `Progress::Need` 表示当前节点需要调用方提供输入或执行器继续执行：
 
 ```rust
@@ -305,6 +334,8 @@ match progress {
     Progress::Deny { node, reason } => println!("deny {node}: {reason}"),
 }
 ```
+
+`Need` 表示还没有完成当前节点；`Retry` 表示可以按策略重新执行；`Deny` 表示流程被拒绝；只有 `Done` 才能进入调用方的登录成功处理。
 
 ### 第六步：提交用户输入
 
@@ -326,6 +357,8 @@ let progress = pipeline.resume(
 let progress = pipeline.run(&mut run, &runner).await?;
 ```
 
+第一段 `resume` 把账号密码交给当前 `input` 节点；第二段 `run` 让 Runner 自动推进后续节点。调用方不能跳过 `resume` 直接伪造 `Done`，也不能把一个节点的数据提交给另一个节点。
+
 只有 Pipeline 返回 `Done`，调用方才应该认为认证流程完成。`Retry`、`Deny` 和 `Need` 都不能签发最终登录结果。
 
 ### 第七步：保存和恢复 Run
@@ -337,12 +370,16 @@ let encoded = serde_json::to_vec(&run)?;
 // 写入调用方自己的 Redis 或数据库，并设置短 TTL。
 ```
 
+序列化失败通常表示 Run 仍然包含密码、验证码、Token、state 或 nonce。正确做法是先执行或清理当前节点，再保存短期状态，而不是关闭敏感数据检查。
+
 恢复时必须加载同一版本的 Pipeline：
 
 ```rust
 let mut run: Run = serde_json::from_slice(&encoded)?;
 let progress = pipeline.run(&mut run, &runner).await?;
 ```
+
+恢复时使用发布 Run 时的同一份 Pipeline；如果配置版本或 hash 不一致，bridge 会拒绝继续，避免新配置误接管旧认证流程。
 
 Run 会拒绝持久化密码、验证码、Token、state、nonce 等敏感字段。调用方仍应在存储层设置认证流程 TTL，并在登录结束、失败或取消时删除 Run。
 
@@ -396,6 +433,8 @@ let pipeline = Pipeline::new(
 );
 ```
 
+这三个节点分别表示：第一个节点收集账号和密码；第二个节点使用 `password` 能力校验；第三个节点写入审计。`.edge(None, "password")` 表示成功后沿默认边进入 `password` 节点。
+
 默认 `Services` 会从调用方的 `Users` Store 查询账号并校验密码。账号表、密码哈希和密码算法由调用方保存；自定义密码算法可以实现自己的 Runner 或注入 `Codecs`。如果没有 `Users` Store，或者使用自己的账号系统，就用自定义 Runner 替换这个 `verify(password)` 节点。
 
 ### 5.2 手机号、滑块、短信验证码
@@ -445,6 +484,15 @@ let pipeline = Pipeline::new(
 );
 ```
 
+这段配置把业务步骤和能力职责一一对应：
+
+- `phone` 是用户输入节点。
+- `captcha` 是人机校验节点。
+- `issue` 生成短信验证码，但不发送短信。
+- `send` 执行短信发送副作用。
+- `code` 是用户输入节点。
+- `check` 消费并校验短信验证码。
+
 这里的职责是分开的：验证码由 issuer 生成，短信由 sender 发送，短信验证码由 verifier 校验。生产环境的验证码 Key、手机号归属和频控由调用方 Store 决定。
 
 ### 5.3 密码加 TOTP
@@ -477,6 +525,8 @@ let pipeline = Pipeline::new(
 );
 ```
 
+这里 `password` 节点成功后把身份传给 `totp` 节点。`totp` 输入节点只收集动态码，`check` 节点才读取 TOTP Secret 并校验动态码。
+
 ### 5.4 密码加 Passkey
 
 Passkey 通常分成签发注册/认证选项和校验浏览器返回值：
@@ -497,6 +547,8 @@ Passkey 通常分成签发注册/认证选项和校验浏览器返回值：
 3. 把 state 短期保存到 `Secrets`。
 4. 接收浏览器 Passkey 响应后提交给 `verify(passkey)`。
 5. 通过 `Passkeys::update` 做计数器 CAS。
+
+因此，`issue(webauthn)` 的结果需要返回给浏览器，浏览器返回的 credential 再由调用方提交给 `input(credential)`；这两个请求之间的 state 由调用方短期保存。
 
 bridge 不保存浏览器 Session，也不决定一个用户是否必须启用 Passkey。
 
@@ -525,6 +577,8 @@ let pipeline = Pipeline::new(
 );
 ```
 
+这里的两条 `edge` 是命名路由：密码 Runner 返回 `normal` 时直接到审计；返回 `risk` 时进入 TOTP。没有返回的分支不会被激活。
+
 路由由 Runner 返回：
 
 ```rust
@@ -536,6 +590,8 @@ Ok(Output::Pass {
 })
 ```
 
+`routes` 决定下一步走哪条边，`data` 是传给下游节点的数据，`identity` 是认证成功后建立或确认的身份，`at` 是结果时间。Pipeline 不解释 `risk` 的业务含义。
+
 Pipeline 不解析脚本表达式；风险判断由调用方 Runner 或风险模块完成。
 
 ### 5.6 All 和 Any
@@ -546,6 +602,8 @@ Pipeline 不解析脚本表达式；风险判断由调用方 Runner 或风险模
 Node::effect("join", "audit").join(Join::All)
 ```
 
+`join(Join::All)` 配置在汇聚节点上；只有前面所有已激活分支都到达这个节点，它才会执行。
+
 适合“密码和 Passkey 都必须通过”。任一分支不可重试失败，整体拒绝。
 
 `Join::Any` 任一分支成功即可继续。它表示“密码或 Passkey 任意一种通过即可”：
@@ -553,6 +611,8 @@ Node::effect("join", "audit").join(Join::All)
 ```rust
 Node::effect("join", "audit").join(Join::Any)
 ```
+
+`join(Join::Any)` 允许任意一条已激活分支成功后继续，其他尚未完成的备用分支会被取消。
 
 适合“密码或 Passkey 任意一种通过”。只有所有分支失败时才拒绝。
 
@@ -565,6 +625,8 @@ Node::verify("captcha", "captcha.slider")
     .retries(2)
     .limit(3)
 ```
+
+`retries(2)` 是交给 Runner 的失败重试次数；`limit(3)` 是节点在整个图运行期间允许被激活的次数。两者用途不同，循环节点不能只设置 retries。
 
 Pipeline 默认最多执行 128 步。存在回边但没有 `limit` 的图会在发布时被拒绝，避免配置错误造成无限执行。
 
@@ -597,17 +659,23 @@ impl Runner for CompanyPassword {
 }
 ```
 
+`node.id` 用来读取当前节点的数据，`account` 和 `password` 是调用方自己约定的字段。成功返回 `Identity` 后，后续节点可以继续使用这份身份；失败返回 `InvalidCredentials`，Pipeline 会按节点策略处理。
+
 自定义 Runner 可以读取节点配置：
 
 ```rust
 let mode = node.args.get("mode").and_then(Value::as_str);
 ```
 
+`node.args` 来自管理端保存的 PipelineConfig。它适合保存非敏感的行为参数；密钥、密码和 Token 应保存为 Secret 引用，由调用方解析。
+
 如果不支持当前节点，必须返回 `Error::Unsupported`，这样 `Fallback` 才会继续调用默认 Runner：
 
 ```rust
 let runner = Fallback::new(CompanyPassword, services);
 ```
+
+这个组合不会复制一套登录流程，只替换节点执行者。Pipeline 仍然由同一份配置驱动。
 
 ## 7. 自定义短信供应商
 
@@ -641,6 +709,8 @@ let sender = SmsSender::with(
 );
 ```
 
+`Sender::send` 只关心目标手机号、验证码和有效期；供应商鉴权、请求签名和 HTTP 调用都封装在调用方实现里。`SmsSender::with` 把这个供应商接入统一短信门面，Pipeline 不需要知道供应商名称。
+
 腾讯云短信使用 API 3.0 `SendSms` 和 TC3-HMAC-SHA256。生产配置填写 `sdk_app_id`、`sign_name`、`template_code`、`access_key_id`、`access_key_secret` 和可选 `region`。开发环境可以注入 Mock `Sender`，生产环境建议启用严格发送失败策略。
 
 社交和企业 Provider 默认使用 15 秒连接与请求超时。GitHub 可以配置 `api_endpoint`，Google 可以配置 `userinfo_endpoint`；测试环境可以通过 `timeout` 和这些端点替换默认值。
@@ -653,6 +723,8 @@ let sender = SmsSender::with(
 let reference = halo::bridge::secret("sms.tencent.secret");
 ```
 
+这段代码生成的是配置引用，例如 `{"$secret":"sms.tencent.secret"}`，不是读取真实密钥。真实值由调用方的 `Resolve` 或 Runner 从环境变量、密钥服务或数据库读取。
+
 真实值由调用方的 `Resolve` 或 Runner 从自己的密钥系统读取，不能把短信密钥、SMTP 密码、TOTP Secret 或私钥写入页面配置。
 
 副作用节点可以配置只执行一次：
@@ -662,6 +734,8 @@ Node::effect("audit", "audit")
     .once(true)
     .idempotency("login-audit")
 ```
+
+`once(true)` 让同一个 Run 不重复执行该副作用，`idempotency` 则提供跨进程幂等 Key。审计、短信发送、邮件发送等有外部影响的节点应考虑这两个字段。
 
 跨进程运行时，实现 `Effects`，并让 `begin` 在自己的存储中原子占用 Key。Pipeline 不绑定 Redis、数据库或具体 async runtime。节点的 `timeout` 只是策略值，真正的任务中断由调用方 runtime 执行。
 
@@ -712,6 +786,8 @@ cargo run --example pipeline_custom
 cargo run --example sender_custom
 ```
 
+这些命令都在 bridge 仓库根目录执行；它们只演示 Pipeline 和能力组合，不会连接真实用户库或真实短信网关。
+
 - `pipeline_linear`：手机号验证码、密码加 TOTP、密码加 Passkey。
 - `pipeline_graph`：风险分支、`Join::All` 和 `Join::Any`。
 - `pipeline_runner`：调用方自动执行节点的 Runner。
@@ -727,5 +803,11 @@ cargo test --workspace --all-targets
 cargo clippy --all-targets --all-features -- -D warnings
 cargo bench --bench pipeline
 ```
+
+- `fmt`：检查 Rust 格式。
+- `check`：检查 workspace 是否能够编译。
+- `test`：执行 Pipeline、协议、Provider 和存储契约测试。
+- `clippy`：检查命名、错误处理和 Rust 代码质量。
+- `bench`：测量 Pipeline 状态推进性能，不代表外部短信、数据库或网络耗时。
 
 `bridge` 不管理 HTTP 路由、Session、RBAC、业务用户、租户关系、组织目录和 OIDC UserInfo 端点；这些由应用层组合。
