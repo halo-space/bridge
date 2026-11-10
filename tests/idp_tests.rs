@@ -678,6 +678,7 @@ async fn test_captcha_service_flow() {
         .issue(&kv, CaptchaType::Slider)
         .await
         .expect("generate failed");
+    assert!(issuer.token(&kv, &challenge2.id, 300).await.is_err());
     let cap_key2 = format!("cap:{}", challenge2.id);
     let answer2_x: i32 = kv
         .data
@@ -707,7 +708,10 @@ async fn test_captcha_service_flow() {
             .keys()
             .any(|key| key.starts_with("cpt:"))
     );
-    let token = issuer.token(&kv, 300).await.expect("token failed");
+    let token = issuer
+        .token(&kv, &challenge2.id, 300)
+        .await
+        .expect("token failed");
     assert!(token.starts_with("cpt_"));
 
     // 4. 登录时核验并消费 captcha_token

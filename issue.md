@@ -10,6 +10,8 @@
 - Magic Link 已拆分为纯载荷/签名核心、issuer 签发和 verifier 校验消费；核心不再访问 Secrets。
 - Passkey 已拆分为 `validator::issuer::Passkey` 和 `validator::verifier::Passkey`，Pipeline 分别注入发起器和校验器。
 - Captcha verifier 只校验并消费挑战；短期通过凭证由 Captcha issuer 单独签发，Pipeline 仍保持原有执行结果。
+- Captcha 通过凭证只能在 verifier 写入一次性通过标记后由 issuer 消费签发，不能脱离校验直接伪造。
+- Pipeline 的 `check(present)` 只读取当前节点 payload，不再从其他分支的历史数据中满足字段检查。
 - 社交静态认证包装已移除，社交 Profile 通过已有转换实现交给调用方处理。
 - `Run` 在包含密码、验证码、TOTP、Token、Passkey 输入等敏感材料时拒绝序列化；完成节点后会清理当前数据和分支 payload，审计证据只保留清理后的数据。
 - Magic Link 默认密钥改为随机值，配置序列化不会输出签名密钥。

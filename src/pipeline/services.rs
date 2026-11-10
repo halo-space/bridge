@@ -325,7 +325,7 @@ fn string(value: &Value, key: &str) -> Result<String> {
         .ok_or_else(|| Error::AuthFailed(format!("Missing field: {key}")))
 }
 
-fn find_string(context: &Context, key: &str) -> Option<String> {
+fn event_string(context: &Context, key: &str) -> Option<String> {
     context
         .data
         .values()

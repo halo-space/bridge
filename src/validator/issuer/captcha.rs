@@ -91,7 +91,10 @@ impl Captcha {
     }
 
     /// 签发校验成功后的短期通过凭证；校验逻辑由 verifier 独立完成。
-    pub async fn token<K: Secrets>(&self, kv: &K, ttl: u64) -> Result<String> {
+    pub async fn token<K: Secrets>(&self, kv: &K, id: &str, ttl: u64) -> Result<String> {
+        if kv.take(&format!("cap:passed:{id}")).await?.is_none() {
+            return Err(Error::CaptchaFailed("Captcha has not been verified".into()));
+        }
         let token = format!("cpt_{}", uuid::Uuid::new_v4().simple());
         kv.set(&format!("cpt:{token}"), "1", ttl.max(1)).await?;
         Ok(token)

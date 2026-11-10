@@ -96,6 +96,7 @@ impl Captcha {
         }
         kv.del(&attempts_key).await?;
         kv.del(&type_key).await?;
+        kv.set(&format!("cap:passed:{}", req.id), "1", 300).await?;
 
         Ok(())
     }

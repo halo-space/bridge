@@ -22,7 +22,7 @@ where
             self.captcha_verify.verify(&self.secrets, &req).await?;
             let token = self
                 .captcha_issue
-                .token(&self.secrets, self.code_ttl)
+                .token(&self.secrets, &req.id, self.code_ttl)
                 .await?;
             return Ok(pass(json!({ "token": token })));
         }

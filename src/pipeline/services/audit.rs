@@ -26,7 +26,7 @@ where
         };
         let event = AuditEvent::new(
             event_type,
-            find_string(context, "client_ip").unwrap_or_default(),
+            event_string(context, "client_ip").unwrap_or_default(),
             AuditOutcome::Success,
         )
         .with_metadata(json!({ "pipeline": true }));

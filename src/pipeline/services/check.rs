@@ -14,8 +14,13 @@ where
             return Ok(pass(Value::Null));
         }
         if kind == "present" {
+            let data = context.data.get(&node.id);
             for field in &node.fields {
-                if find_string(context, field).is_none() {
+                let present = data
+                    .and_then(|value| value.get(field))
+                    .and_then(Value::as_str)
+                    .is_some_and(|value| !value.trim().is_empty());
+                if !present {
                     return Ok(Output::Fail {
                         reason: format!("Missing field: {field}"),
                         retry: false,

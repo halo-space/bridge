@@ -166,6 +166,8 @@
 - [x] Magic Link 拆分纯签名核心、issuer 签发和 verifier 消费
 - [x] Passkey 拆分 issuer 发起和 verifier 完成校验
 - [x] Captcha 拆分挑战签发、答案校验和通过凭证签发
+- [x] Captcha 通过凭证必须绑定 verifier 的一次性成功标记
+- [x] Pipeline present 检查只读取当前节点 payload
 - [x] Token、RSA、通知门面和社交静态包装完成命名收口
 
 `Cards::schema()` 现在导出 JSON Schema、能力码和每个 Card 的参数 Schema。Pipeline 会拒绝重复节点、重复 route、空能力码、错误参数类型、未知参数、非法 Secret 引用和未限制的任意子图回边。`Effects` 提供跨进程幂等所需的原子 begin/complete/cancel 契约；bridge 不选择具体数据库或缓存。`retries` 由 Pipeline 记录每个节点实际交给 Runner 的次数并执行上限，`timeout` 由调用方的异步运行时负责中断，bridge 不绑定具体 runtime。
