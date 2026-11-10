@@ -1,4 +1,4 @@
-use crate::validator::verifier::captcha::TargetPoint;
+use crate::validator::captcha::TargetPoint;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use rand_core::{OsRng, RngCore};

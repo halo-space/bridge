@@ -6,7 +6,7 @@ pub mod rotate;
 pub mod slider;
 
 pub use self::{click::Click, image::Image, rotate::Rotate, slider::Slider};
-use crate::validator::verifier::captcha::{CaptchaChallenge, CaptchaType};
+use crate::validator::captcha::{CaptchaChallenge, CaptchaType};
 
 /// 人机验证码签发。
 pub struct Captcha {

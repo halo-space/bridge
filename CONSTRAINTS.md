@@ -10,6 +10,7 @@
 - issuer 只负责签发，sender 只负责发送，verifier 只负责校验；生成、发送、校验不能在一个具体实现里混合。
 - store 只定义调用方提供的存储契约，不依赖具体数据库、缓存或业务服务。
 - types 只放数据模型，不放网络请求、存储访问和认证流程。
+- issuer 与 verifier 共用的数据模型必须放在 validator 公共模型层，禁止 issuer 反向依赖 verifier。
 
 ## 命名
 
