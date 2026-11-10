@@ -51,17 +51,17 @@ bridge 是认证能力库，不是完整的账号中心。它不会自动创建�
 - 决定认证完成后签发什么应用 Token，或如何建立 Session。
 - 在自己的请求层限制登录运行状态的 TTL。
 
-## 3. 名词和模块
+## 3. 这些模块分别做什么
 
 ### 3.1 Pipeline
 
-Pipeline 是登录流程图。它只知道节点、边、路由、汇聚、重试和状态，不知道“用户表在哪里”或“短信供应商是什么”。
+Pipeline 是登录流程。你可以把它理解为一串可连接的步骤，例如“输入手机号 → 检查滑块 → 发送短信 → 检查短信验证码”。它负责步骤顺序、分支、重试和当前进度，不负责查询用户表，也不负责选择短信供应商。
 
-### 3.2 issuer、sender、verifier
+### 3.2 生成、发送和检查
 
-- `issuer`：生成验证码、挑战、nonce、临时凭证等材料。
-- `sender`：把已经生成的内容发送到短信、邮件等通道。
-- `verifier`：校验验证码、TOTP、PKCE、state、nonce、Passkey 等材料。
+- `issuer`：生成登录过程中临时使用的内容，例如验证码、Passkey 请求和一次性链接。
+- `sender`：把已经生成的验证码发送到短信或邮箱。
+- `verifier`：检查用户提交的验证码、TOTP、Passkey 或协议参数是否正确。
 
 同名能力通过模块路径区分，例如使用 `validator::issuer::Captcha` 生成挑战，使用 `validator::verifier::Captcha` 校验挑战；`issuer::Passkey` 负责发起浏览器流程，`verifier::Passkey` 负责完成校验。
 
@@ -77,10 +77,12 @@ Pipeline 是登录流程图。它只知道节点、边、路由、汇聚、重�
 
 这里的箭头表示节点之间的执行顺序：用户输入由调用方提交，Pipeline 再把数据传给下一个节点；每个节点的具体实现由 issuer、sender 或 verifier 完成。
 
-### 3.3 Cards、Services、Runner
+### 3.3 配置、默认执行器和自定义执行器
 
-- `Cards` 是配置注册表，描述某个 `type/code` 是否存在、需要哪些参数以及参数类型。
-- `Services` 是 bridge 提供的默认 Runner，内部能力表把 `password`、`totp`、`sms`、`sms.send` 等能力码绑定到实现。
+- `Cards` 是页面配置允许使用的能力清单。它描述某个能力是否存在、需要哪些参数以及参数类型。
+- `Services` 是 bridge 提供的默认执行器。它把 `password`、`totp`、`sms`、`sms.send` 等能力连接到具体实现。
+- `Runner` 是一次节点执行器。调用方可以实现自己的 Runner，接入自己的用户系统、风控系统或通知服务。
+- `Fallback` 可以把两个 Runner 组合起来：先调用自定义 Runner，自定义 Runner 表示“不处理”时再使用默认 Services。
 - `Runner` 是执行器。调用方可以完全自己实现，也可以用 `Fallback` 在默认能力之外增加自定义能力。
 
 这三个东西不是同一份配置：

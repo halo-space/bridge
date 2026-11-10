@@ -41,12 +41,12 @@ src/
 ├── token/                  # 登录 Token 和公钥信息
 ├── rules/                  # 密码、锁定、重认证规则
 ├── pkg/                    # 密码、TOTP、恢复码、RSA 等算法
-├── pipeline/               # 统一登录前、中、后的节点 DAG 和内置执行绑定
-│   ├── model.rs            # 节点、上下文、事件和 Runner 契约
+├── pipeline/               # 统一登录流程：节点、顺序、分支和执行状态
+│   ├── model.rs            # 节点、上下文、事件和执行器接口
 │   ├── run.rs              # 可恢复运行状态和进度
 │   ├── engine.rs           # 图调度、汇聚、重试和执行
-│   ├── config.rs           # 配置编译、能力卡片和 Schema
-│   └── services/           # 按能力拆分的内置 Runner
+│   ├── config.rs           # 配置检查和页面字段说明
+│   └── services/           # 内置认证能力的执行实现
 ├── audit.rs                # 安全审计事件模型
 ├── risk.rs                 # 风险评分和阻断决策
 └── error.rs                # 统一错误类型
@@ -54,13 +54,13 @@ src/
 
 根目录 `examples/` 提供 Pipeline 组合和执行示例。
 
-`factor/oidc` 同时承载外部 OIDC 登录 Provider 和 OAuth/OIDC 流程参数。`factor/enterprise` 保留 LDAP、SAML、企业微信和钉钉等企业专属身份源。
+`factor/oidc` 放 OAuth/OIDC 登录协议和外部身份源。`factor/enterprise` 放 LDAP、SAML、企业微信和钉钉等企业身份源。
 
 ## 核心边界
 
 `factor` 表示一种完整的登录方式，例如密码登录或 GitHub 登录。`validator` 负责登录过程中会短时间使用的安全信息，例如验证码、TOTP 校验结果、Passkey challenge 和 Magic Link。`pkg` 放密码、RSA、TOTP 等底层算法。`token` 负责签发和校验登录后的 Token。`store` 只规定调用方需要提供哪些读写接口。
 
-`state`、`nonce` 和 PKCE 属于 `factor/oidc`。它们参与协议流程校验，不属于 `validator`。
+`state`、`nonce` 和 PKCE 是 OAuth/OIDC 登录过程中防伪造和防重复使用的参数，放在 `factor/oidc`，不属于普通验证码模块。
 
 Bridge 不保存业务用户，也不执行账号绑定。Provider 只把第三方已认证资料转换为统一的 `Identity`。
 
@@ -72,14 +72,14 @@ Bridge 不保存业务用户，也不执行账号绑定。Provider 只把第三�
 | --- | --- | --- |
 | 账号、邮箱、手机号密码 | 已实现 | `factor/basic/password` |
 | 邮箱、短信、TOTP 登录 | 已实现 | `factor/basic/code` |
-| 图形、滑块、旋转、点选验证码 | 已实现 | `validator/verifier/captcha` |
+| 图形、滑块、旋转、点选验证码 | 已实现 | `validator/issuer/captcha` 生成，`validator/verifier/captcha` 检查 |
 | 恢复码和 Magic Link | 已实现 | `validator` 和 `factor/basic/magic` |
 | GitHub、飞书、Google、微信 | 已实现 | 授权地址、授权码交换、资料转换 |
 | LDAP | 已实现 | 服务账号绑定、用户搜索、密码绑定、Identity 输出 |
 | SAML | 已实现 | 企业单点登录、签名检查、时间检查和防重复使用 |
 | 企业微信、钉钉 | 已实现 | 授权码交换和 Identity 输出 |
 | OIDC Authorization Code | 已实现 | OAuth/OIDC 授权码、PKCE、state、nonce、刷新和撤销 |
-| UserInfo、Introspection、隐式授权 | 边界已确定 | 不维护业务用户；调用方用 `verify_live` 组装 Introspection；只支持 Authorization Code + PKCE |
+| UserInfo、Introspection、隐式授权 | 边界已确定 | Bridge 不维护业务用户；应用层可以用 Token 校验结果自行返回用户信息；只支持授权码 + PKCE |
 | Passkey / WebAuthn | 已实现 | 注册、登录、设备状态和计数器更新；凭证由调用方保存 |
 | Device | 已实现 | RSA-SHA256 nonce 证明、启停、时间窗口和 `Devices` 存储契约 |
 | Pipeline | 已实现 | 支持输入、检查、签发、发送、校验、审计、内置 `Services` 执行绑定、路由分支、All/Any 汇聚、有限循环、上下文传递、重试、拒绝和暂停继续 |
@@ -122,11 +122,11 @@ Pipeline 的 `Services` 是 bridge 提供的可选默认适配器，不是能力
 
 页面配置通过 `PipelineConfig` 编译，并使用 `Cards` 校验固定能力码；自定义能力例如 `custom.card` 必须先注册。节点的 `args` 会传给用户自己的 `Runner`。
 
-`Cards::schema()` 可生成页面编辑器使用的 JSON Schema、能力码和每个 Card 的参数 Schema；编译时会校验参数类型、未知参数和 Secret 引用。敏感配置使用 `secret("...")` 保存引用，真实密钥由应用层解析。
+`Cards::schema()` 会生成页面编辑器需要的字段说明：可以选择哪些能力、每个能力需要填写什么参数，以及哪些参数必须保密。编译配置时会检查参数类型、未知参数和保密引用。页面里只保存类似 `secret("...")` 的引用，真实密钥由应用层读取。
 
-发布配置后可以调用 `Cards::run` 预检查实际 Runner 是否支持所有能力和版本；它只检查兼容性，真正执行仍使用 `Pipeline::run`。
+发布配置前可以调用 `Cards::run` 检查当前执行器是否支持所有步骤；它只做发布前检查，真正登录仍由 `Pipeline::run` 执行。
 
-配置编译后会生成版本和 hash，运行中的 `Run` 会绑定这两个值；页面发布新配置不会改变已经开始的认证流程。`Context` 还支持 `protocol`、`connection`、`request` 和 `meta`，用于传递请求和身份源上下文。
+配置编译后会带上版本和校验值，已经开始的登录会继续使用原来的配置。`Context` 用来传递本次请求、客户端平台和身份源信息。
 
 所有可替换节点都通过 trait 扩展。内置短信使用 `SmsSender` 门面和 `Sender` 适配器；腾讯云使用 API 3.0 `SendSms` 与 TC3-HMAC-SHA256，其他供应商可以实现 `Sender` 后通过 `SmsSender::with` 接入。Pipeline 的自定义节点使用 `Runner`，可通过 `Fallback` 在保留内置能力的同时增加自己的社交、企业或业务认证逻辑。
 
@@ -158,11 +158,11 @@ Magic Link 的签发和校验分别使用 `validator::issuer::Magic` 与 `valida
 
 OIDC 相关代码位于 `factor/oidc`：
 
-- `flow.rs` 负责授权码、客户端、scope、redirect URI、PKCE 和 Refresh Token
-- OIDC 流程只处理协议校验和临时凭证；客户端、授权码和业务命名空间由调用方提供
-- `state.rs`、`nonce.rs`、`pkce.rs` 负责流程参数生成和校验
-- `server.rs` 负责 Discovery、撤销和响应模型
-- `provider/` 负责外部 OIDC Claims 到 `Identity` 的转换
+- `flow.rs` 负责第三方登录授权码、回调地址、刷新 Token 等流程检查
+- `state`、`nonce` 和 PKCE 用来防止伪造回调和重复提交
+- `server.rs` 提供协议发现、撤销和响应数据结构
+- `provider/` 把外部身份源返回的信息转换成统一的 `Identity`
+- 用户、客户端和业务数据由调用方提供，Bridge 不创建业务用户
 
 Discovery 只声明当前已经实现的 Authorization Code、PKCE、JWKS 和撤销能力。
 

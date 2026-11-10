@@ -1,5 +1,7 @@
 # bridge 实施计划
 
+本文是开发计划，记录架构和验收项。普通接入者请阅读 [README.md](README.md) 和 [USAGE.md](USAGE.md)；其中 `issuer` 表示生成，`sender` 表示发送，`verifier` 表示检查。
+
 范围只包含 `bridge`。应用层数据库、缓存、HTTP 路由和调用方迁移不纳入本计划。
 
 ## 重构原则
@@ -176,9 +178,9 @@
 
 结论：`verify_token` 只做签名和 Claims 校验；需要实时状态的请求统一使用 `verify_live`。Refresh Token 换发通过 `Users` 检查用户存在和 `is_active`，业务命名空间、租户关系和用户数据由调用方管理。RSA 使用 `from_private_pem` 加载持久化密钥，`private_key_pem` 导出，`rotate` 显式轮换；全局生成只作为默认兼容入口。短信和邮件 sender 的 `strict` 模式用于生产失败闭环，关闭时保留开发 Mock 行为。Events 使用 `event.id` 幂等，并支持 trace/request 字段；写入失败由存储实现返回错误。
 
-## 调用方命名空间边界
+## 调用方负责业务范围
 
-bridge 不感知租户，也不为验证码、授权码、设备、Passkey 或审计事件生成租户隔离规则。调用方应在自己的存储实现中把租户、应用、平台或其他业务范围编码进 Key，并使用 `Identity.subject`、Store 参数或外部上下文完成归属校验。bridge 只负责协议、材料生命周期和调用方传入 subject 的一致性检查。
+bridge 不感知租户，也不为验证码、授权码、设备、Passkey 或审计事件自动建立租户隔离。调用方应在自己的存储键、存储参数或请求上下文中带上租户、应用和平台信息，并检查记录是否属于当前业务范围。bridge 只负责协议、安全信息的有效期和一次性消费，以及身份标识的一致性检查。
 
 ## 验收命令
 

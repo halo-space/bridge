@@ -1,5 +1,7 @@
 # bridge 当前问题
 
+本文是开发排查记录，面向维护代码的开发者；面向接入方的说明请先阅读 [README.md](README.md) 和 [USAGE.md](USAGE.md)。文中的 `issuer`、`sender`、`verifier` 分别表示“生成、发送、检查”。
+
 ## 重构约束
 
 职责单一和简约命名约束统一记录在 [CONSTRAINTS.md](CONSTRAINTS.md)。后续拆分、命名和扩展必须先满足该文件中的约束。
@@ -29,13 +31,13 @@
 
 ## 复查结果
 
-### 已收口：调用方负责业务命名空间
+### 已收口：业务范围由调用方负责
 
-bridge 不负责租户、应用或组织隔离。验证码、授权码、设备、Passkey 和审计 Key 的命名空间由调用方的 Store 实现决定；调用方需要自行把业务范围编码到 Key，或通过外部上下文完成归属校验。bridge 只提供材料生成、校验、单次消费和 subject 一致性检查。
+bridge 不负责租户、应用或组织隔离。验证码、授权码、设备、Passkey 和审计记录属于哪个业务范围，由调用方的存储实现决定。调用方需要在自己的存储键或请求上下文中带上应用和平台信息。bridge 只负责生成、检查、一次性消费安全信息，并比较身份标识是否一致。
 
 ### 已收口：Device 和 Passkey 绑定当前身份
 
-Device 校验会比较 `Device.subject` 与当前 `Context.identity.subject`；Passkey 校验会比较凭证记录的 subject。调用方仍需保证 Store 返回的记录已经属于当前业务范围，并在建立 `Identity` 时传入稳定的 opaque subject。
+Device 校验会比较设备记录和当前登录身份的标识；Passkey 校验会比较凭证记录和当前身份的标识。调用方仍需保证存储返回的记录属于当前业务范围，并传入一个稳定、只由调用方解释的身份标识。
 
 ### 已收口：Run 敏感数据检查
 
@@ -69,9 +71,9 @@ Magic Link 只负责签名和有效期；`redirect_to` 的允许域名、路径�
 
 签发和校验入口现在会拒绝空 issuer、短 HS256 密钥、非正 TTL 以及不完整的 RSA 密钥配置。
 
-### 已收口：Passkey 使用 opaque subject
+### 已收口：Passkey 使用调用方身份标识
 
-`validator::issuer::Passkey::issue` 使用随机 UUID 作为协议层 user handle，把调用方传入的 opaque subject 保存在注册状态和 Passkey 记录中，业务 subject 不再要求 UUID。
+`validator::issuer::Passkey::issue` 使用随机 UUID 作为 WebAuthn 协议需要的用户句柄，同时保存调用方传入的身份标识。这个标识不要求是 UUID，业务系统可以使用自己的用户编号。
 
 注册和认证只接受 bridge 当前的结构化 state，不再兼容旧的裸 WebAuthn state；认证成功且流程尚未有身份时，会用 Passkey subject 建立 `Identity`。
 
