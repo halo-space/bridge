@@ -773,6 +773,81 @@ Provider 模块负责协议链路：生成授权地址、使用 code 换 token�
 
 因此，“Provider 能换到第三方身份”和“业务登录流程允许这个身份源”是两个步骤；后者由调用方 Runner 和 PipelineConfig 决定。
 
+一个 GitHub 登录节点的完整数据流可以这样理解：
+
+```text
+input(code, state, redirect_uri)
+  → verify(custom.github)
+      读取当前节点 payload
+      校验 state / PKCE
+      调用 GithubProvider::exchange_code_for_profile
+      把 SocialProfile 转成 Identity
+      返回 Output::Pass
+  → 后续审计、TOTP 或完成节点
+  → Done
+```
+
+示例 Runner（`AppSecrets::take_state` 是调用方自己的封装，实际项目按自己的 Store 实现）：
+
+```rust
+struct GithubLogin {
+    provider: GithubProvider,
+    // 调用方自己的 Secrets 实现，用来保存和消费 state / PKCE。
+    secrets: AppSecrets,
+}
+
+impl Runner for GithubLogin {
+    async fn run(&self, node: &Node, context: &Context) -> halo::Result<Output> {
+        // 当前节点的 payload 来自上一个 input 节点。
+        let data = context
+            .data
+            .get(&node.id)
+            .and_then(serde_json::Value::as_object)
+            .ok_or(halo::Error::AuthFailed("Missing GitHub input".into()))?;
+        let code = data
+            .get("code")
+            .and_then(serde_json::Value::as_str)
+            .ok_or(halo::Error::AuthFailed("Missing GitHub code".into()))?;
+        let state = data
+            .get("state")
+            .and_then(serde_json::Value::as_str)
+            .ok_or(halo::Error::AuthFailed("Missing GitHub state".into()))?;
+        let redirect_uri = data
+            .get("redirect_uri")
+            .and_then(serde_json::Value::as_str)
+            .ok_or(halo::Error::AuthFailed("Missing redirect URI".into()))?;
+
+        // 先用调用方自己的 Secrets 校验并单次消费 state / PKCE。
+        self.secrets.take_state(state).await?;
+
+        // Provider 只负责第三方协议，不查询本地用户，也不做账号绑定。
+        let profile = self
+            .provider
+            .exchange_code_for_profile(code, redirect_uri)
+            .await?;
+        let identity: Identity = profile.clone().into();
+
+        Ok(Output::Pass {
+            routes: Vec::new(),
+            // 只把后续流程需要的资料交给 Pipeline，不把 access_token 放进去。
+            data: serde_json::to_value(profile)?,
+            identity: Some(identity),
+            at: chrono::Utc::now().timestamp(),
+        })
+    }
+}
+```
+
+这个 Runner 返回 `Output::Pass` 后，Pipeline 只负责继续执行后续节点。调用方在 `Done` 之后自行决定：
+
+- 使用 `Identity.provider` 和 `Identity.subject` 查询自己的账号。
+- 没有绑定时创建业务账号，或要求用户确认绑定。
+- 保存第三方资料到自己的表。
+- 签发应用 Token 或创建 Session。
+- 拒绝登录、记录审计或进入二次验证。
+
+这些动作都不属于 Provider，也不属于 bridge 的默认 Services。
+
 ## 8. Secret、Effects 和超时
 
 页面或 Pipeline JSON 中只保存 Secret 引用：
