@@ -1,8 +1,7 @@
 use halo::Error;
-use halo::factor::enterprise::{DingtalkConfig, DingtalkProvider, WecomConfig, WecomProvider};
+use halo::factor::enterprise::{Dingtalk, DingtalkConfig, Wecom, WecomConfig};
 use halo::factor::social::{
-    FeishuConfig, FeishuProvider, GithubConfig, GithubProvider, GoogleConfig, GoogleProvider,
-    WechatConfig, WechatProvider,
+    Feishu, FeishuConfig, Github, GithubConfig, Google, GoogleConfig, Wechat, WechatConfig,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -11,12 +10,12 @@ const DEAD: &str = "http://127.0.0.1:1";
 
 #[tokio::test]
 async fn providers_surface_network_failures() {
-    let github = GithubProvider::new(GithubConfig {
+    let github = Github::new(GithubConfig {
         client_id: "id".into(),
         client_secret: "secret".into(),
         scope: None,
     })
-    .endpoint(DEAD);
+    .auth(DEAD);
     assert!(
         github
             .exchange_code_for_profile("code", "https://app/callback")
@@ -24,12 +23,12 @@ async fn providers_surface_network_failures() {
             .is_err()
     );
 
-    let google = GoogleProvider::new(GoogleConfig {
+    let google = Google::new(GoogleConfig {
         client_id: "id".into(),
         client_secret: "secret".into(),
         scope: None,
     })
-    .endpoint(DEAD);
+    .auth(DEAD);
     assert!(
         google
             .exchange_code_for_profile("code", "https://app/callback")
@@ -37,19 +36,19 @@ async fn providers_surface_network_failures() {
             .is_err()
     );
 
-    let wechat = WechatProvider::new(WechatConfig {
+    let wechat = Wechat::new(WechatConfig {
         app_id: "id".into(),
         app_secret: "secret".into(),
         scope: None,
     })
-    .endpoint(DEAD);
+    .api(DEAD);
     assert!(wechat.exchange_code_for_profile("code").await.is_err());
 
-    let feishu = FeishuProvider::new(FeishuConfig {
+    let feishu = Feishu::new(FeishuConfig {
         app_id: "id".into(),
         app_secret: "secret".into(),
     })
-    .endpoint(DEAD);
+    .api(DEAD);
     assert!(
         feishu
             .exchange_code_for_profile("code", "https://app/callback")
@@ -57,19 +56,19 @@ async fn providers_surface_network_failures() {
             .is_err()
     );
 
-    let wecom = WecomProvider::new(WecomConfig {
+    let wecom = Wecom::new(WecomConfig {
         corp_id: "id".into(),
         agent_id: "agent".into(),
         corp_secret: "secret".into(),
     })
-    .endpoint(DEAD);
+    .api(DEAD);
     assert!(wecom.exchange_code_for_user("code").await.is_err());
 
-    let dingtalk = DingtalkProvider::new(DingtalkConfig {
+    let dingtalk = Dingtalk::new(DingtalkConfig {
         client_id: "id".into(),
         client_secret: "secret".into(),
     })
-    .endpoint(DEAD);
+    .api(DEAD);
     assert!(dingtalk.exchange_code_for_user("code").await.is_err());
 }
 
@@ -121,12 +120,12 @@ fn oauth_error<T>(result: halo::Result<T>, text: &str) {
 
 #[tokio::test]
 async fn providers_surface_business_errors() {
-    let github = GithubProvider::new(GithubConfig {
+    let github = Github::new(GithubConfig {
         client_id: "id".into(),
         client_secret: "secret".into(),
         scope: None,
     })
-    .endpoint(endpoint(r#"{"error":"bad_code","error_description":"invalid code"}"#).await);
+    .auth(endpoint(r#"{"error":"bad_code","error_description":"invalid code"}"#).await);
     oauth_error(
         github
             .exchange_code_for_profile("code", "https://app/callback")
@@ -134,12 +133,12 @@ async fn providers_surface_business_errors() {
         "invalid code",
     );
 
-    let google = GoogleProvider::new(GoogleConfig {
+    let google = Google::new(GoogleConfig {
         client_id: "id".into(),
         client_secret: "secret".into(),
         scope: None,
     })
-    .endpoint(endpoint(r#"{"error":"invalid_grant","error_description":"expired code"}"#).await);
+    .auth(endpoint(r#"{"error":"invalid_grant","error_description":"expired code"}"#).await);
     oauth_error(
         google
             .exchange_code_for_profile("code", "https://app/callback")
@@ -147,22 +146,22 @@ async fn providers_surface_business_errors() {
         "expired code",
     );
 
-    let wechat = WechatProvider::new(WechatConfig {
+    let wechat = Wechat::new(WechatConfig {
         app_id: "id".into(),
         app_secret: "secret".into(),
         scope: None,
     })
-    .endpoint(endpoint(r#"{"errcode":40029,"errmsg":"invalid code"}"#).await);
+    .api(endpoint(r#"{"errcode":40029,"errmsg":"invalid code"}"#).await);
     oauth_error(
         wechat.exchange_code_for_profile("code").await,
         "invalid code",
     );
 
-    let feishu = FeishuProvider::new(FeishuConfig {
+    let feishu = Feishu::new(FeishuConfig {
         app_id: "id".into(),
         app_secret: "secret".into(),
     })
-    .endpoint(endpoint(r#"{"code":999,"msg":"invalid app"}"#).await);
+    .api(endpoint(r#"{"code":999,"msg":"invalid app"}"#).await);
     oauth_error(
         feishu
             .exchange_code_for_profile("code", "https://app/callback")
@@ -170,19 +169,19 @@ async fn providers_surface_business_errors() {
         "invalid app",
     );
 
-    let wecom = WecomProvider::new(WecomConfig {
+    let wecom = Wecom::new(WecomConfig {
         corp_id: "id".into(),
         agent_id: "agent".into(),
         corp_secret: "secret".into(),
     })
-    .endpoint(endpoint(r#"{"errcode":40014,"errmsg":"invalid corp"}"#).await);
+    .api(endpoint(r#"{"errcode":40014,"errmsg":"invalid corp"}"#).await);
     oauth_error(wecom.exchange_code_for_user("code").await, "invalid corp");
 
-    let dingtalk = DingtalkProvider::new(DingtalkConfig {
+    let dingtalk = Dingtalk::new(DingtalkConfig {
         client_id: "id".into(),
         client_secret: "secret".into(),
     })
-    .endpoint(endpoint(r#"{"code":"invalid","message":"invalid app"}"#).await);
+    .api(endpoint(r#"{"code":"invalid","message":"invalid app"}"#).await);
     oauth_error(dingtalk.exchange_code_for_user("code").await, "invalid app");
 }
 
@@ -193,13 +192,13 @@ async fn providers_complete_success_flows() {
         r#"{"id":7,"login":"alice","name":"Alice","email":"alice@example.com"}"#,
     ])
     .await;
-    let github = GithubProvider::new(GithubConfig {
+    let github = Github::new(GithubConfig {
         client_id: "id".into(),
         client_secret: "secret".into(),
         scope: None,
     })
-    .endpoint(&github_endpoint)
-    .api_endpoint(&github_endpoint);
+    .auth(&github_endpoint)
+    .api(&github_endpoint);
     let profile = github
         .exchange_code_for_profile("code", "https://app/callback")
         .await
@@ -213,13 +212,13 @@ async fn providers_complete_success_flows() {
         r#"{"sub":"google-1","email":"alice@example.com","name":"Alice"}"#,
     ])
     .await;
-    let google = GoogleProvider::new(GoogleConfig {
+    let google = Google::new(GoogleConfig {
         client_id: "id".into(),
         client_secret: "secret".into(),
         scope: None,
     })
-    .endpoint(&google_endpoint)
-    .userinfo_endpoint(&google_endpoint);
+    .auth(&google_endpoint)
+    .userinfo(&google_endpoint);
     let profile = google
         .exchange_code_for_profile("code", "https://app/callback")
         .await
@@ -232,12 +231,12 @@ async fn providers_complete_success_flows() {
         r#"{"openid":"wx-1","unionid":"union-1","nickname":"Alice"}"#,
     ])
     .await;
-    let wechat = WechatProvider::new(WechatConfig {
+    let wechat = Wechat::new(WechatConfig {
         app_id: "id".into(),
         app_secret: "secret".into(),
         scope: None,
     })
-    .endpoint(&wechat_endpoint);
+    .api(&wechat_endpoint);
     let profile = wechat.exchange_code_for_profile("code").await.unwrap();
     assert_eq!(profile.provider, "wechat");
     assert_eq!(profile.openid, "wx-1");
@@ -249,11 +248,11 @@ async fn providers_complete_success_flows() {
         r#"{"data":{"open_id":"fs-1","union_id":"union-1","name":"Alice"}}"#,
     ])
     .await;
-    let feishu = FeishuProvider::new(FeishuConfig {
+    let feishu = Feishu::new(FeishuConfig {
         app_id: "id".into(),
         app_secret: "secret".into(),
     })
-    .endpoint(&feishu_endpoint);
+    .api(&feishu_endpoint);
     let profile = feishu
         .exchange_code_for_profile("code", "https://app/callback")
         .await
@@ -266,28 +265,25 @@ async fn providers_complete_success_flows() {
         r#"{"UserId":"wecom-1","name":"Alice"}"#,
     ])
     .await;
-    let wecom = WecomProvider::new(WecomConfig {
+    let wecom = Wecom::new(WecomConfig {
         corp_id: "id".into(),
         agent_id: "agent".into(),
         corp_secret: "secret".into(),
     })
-    .endpoint(&wecom_endpoint);
+    .api(&wecom_endpoint);
     let value = wecom.exchange_code_for_user("code").await.unwrap();
-    assert_eq!(WecomProvider::identity(&value).unwrap().subject, "wecom-1");
+    assert_eq!(Wecom::identity(&value).unwrap().subject, "wecom-1");
 
     let dingtalk_endpoint = sequence(vec![
         r#"{"accessToken":"ding-token"}"#,
         r#"{"unionId":"ding-1","nick":"Alice"}"#,
     ])
     .await;
-    let dingtalk = DingtalkProvider::new(DingtalkConfig {
+    let dingtalk = Dingtalk::new(DingtalkConfig {
         client_id: "id".into(),
         client_secret: "secret".into(),
     })
-    .endpoint(&dingtalk_endpoint);
+    .api(&dingtalk_endpoint);
     let value = dingtalk.exchange_code_for_user("code").await.unwrap();
-    assert_eq!(
-        DingtalkProvider::identity(&value).unwrap().subject,
-        "ding-1"
-    );
+    assert_eq!(Dingtalk::identity(&value).unwrap().subject, "ding-1");
 }

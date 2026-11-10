@@ -761,7 +761,7 @@ let sender = SmsSender::with(
 
 腾讯云短信使用 API 3.0 `SendSms` 和 TC3-HMAC-SHA256。生产配置填写 `sdk_app_id`、`sign_name`、`template_code`、`access_key_id`、`access_key_secret` 和可选 `region`。开发环境可以注入 Mock `Sender`，生产环境建议启用严格发送失败策略。
 
-社交和企业 Provider 默认使用 15 秒连接与请求超时。GitHub 可以配置 `api_endpoint`，Google 可以配置 `userinfo_endpoint`；测试环境可以通过 `timeout` 和这些端点替换默认值。
+社交和企业 Provider 默认使用 15 秒连接与请求超时。GitHub 可以通过 `auth` 和 `api` 替换授权与 API 地址，Google 可以通过 `auth` 和 `userinfo` 替换授权与用户资料地址；测试环境可以通过 `timeout` 和这些端点替换默认值。
 
 Provider 模块负责协议链路：生成授权地址、使用 code 换 token、读取第三方资料并转换成标准 Profile。它们不会自动注册到默认 `Services`，也不会自动绑定本地用户。要把微信、GitHub、Google、飞书、企业微信或钉钉放进 Pipeline，调用方需要实现一个 Runner：
 
@@ -780,7 +780,7 @@ input(code, state, redirect_uri)
   → verify(custom.github)
       读取当前节点 payload
       校验 state / PKCE
-      调用 GithubProvider::exchange_code_for_profile
+      调用 Github::exchange_code_for_profile
       把 SocialProfile 转成 Identity
       返回 Output::Pass
   → 后续审计、TOTP 或完成节点
@@ -791,7 +791,7 @@ input(code, state, redirect_uri)
 
 ```rust
 struct GithubLogin {
-    provider: GithubProvider,
+    provider: Github,
     // 调用方自己的 Secrets 实现，用来保存和消费 state / PKCE。
     secrets: AppSecrets,
 }

@@ -3,10 +3,10 @@ pub mod github;
 pub mod google;
 pub mod wechat;
 
-pub use feishu::{FeishuConfig, FeishuProvider};
-pub use github::{GithubConfig, GithubProvider};
-pub use google::{GoogleConfig, GoogleProvider};
-pub use wechat::{WechatConfig, WechatProvider};
+pub use feishu::{Feishu, FeishuConfig};
+pub use github::{Github, GithubConfig};
+pub use google::{Google, GoogleConfig};
+pub use wechat::{Wechat, WechatConfig};
 
 use crate::types::{AuthResult, Identity, Level, Method};
 use serde::{Deserialize, Serialize};

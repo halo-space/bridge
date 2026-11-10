@@ -12,30 +12,30 @@ pub struct GithubConfig {
     pub scope: Option<String>,
 }
 
-pub struct GithubProvider {
+pub struct Github {
     config: GithubConfig,
-    endpoint: String,
-    api_endpoint: String,
+    auth: String,
+    api: String,
     timeout: Duration,
 }
 
-impl GithubProvider {
+impl Github {
     pub fn new(config: GithubConfig) -> Self {
         Self {
             config,
-            endpoint: "https://github.com".into(),
-            api_endpoint: "https://api.github.com".into(),
+            auth: "https://github.com".into(),
+            api: "https://api.github.com".into(),
             timeout: crate::pkg::http::DEFAULT_TIMEOUT,
         }
     }
 
-    pub fn endpoint(mut self, endpoint: impl Into<String>) -> Self {
-        self.endpoint = endpoint.into();
+    pub fn auth(mut self, endpoint: impl Into<String>) -> Self {
+        self.auth = endpoint.into();
         self
     }
 
-    pub fn api_endpoint(mut self, endpoint: impl Into<String>) -> Self {
-        self.api_endpoint = endpoint.into();
+    pub fn api(mut self, endpoint: impl Into<String>) -> Self {
+        self.api = endpoint.into();
         self
     }
 
@@ -48,7 +48,7 @@ impl GithubProvider {
     pub fn authorize_url(&self, state: &str, redirect_uri: &str) -> Result<String> {
         let mut u = Url::parse(&format!(
             "{}/login/oauth/authorize",
-            self.endpoint.trim_end_matches('/')
+            self.auth.trim_end_matches('/')
         ))
         .map_err(|e| Error::Internal(e.to_string()))?;
 
@@ -103,7 +103,7 @@ impl GithubProvider {
         // 1. 换取 access_token
         let token_url = format!(
             "{}/login/oauth/access_token",
-            self.endpoint.trim_end_matches('/')
+            self.auth.trim_end_matches('/')
         );
         let params = [
             ("client_id", self.config.client_id.as_str()),
@@ -137,7 +137,7 @@ impl GithubProvider {
 
         // 2. 拉取用户信息
         let user_resp = http
-            .get(format!("{}/user", self.api_endpoint.trim_end_matches('/')))
+            .get(format!("{}/user", self.api.trim_end_matches('/')))
             .header("Authorization", format!("Bearer {access_token}"))
             .header("User-Agent", "Halo-IdP")
             .header("Accept", "application/json")
@@ -155,10 +155,7 @@ impl GithubProvider {
         // 若用户公开邮箱为空，尝试拉取 primary 邮箱
         if user_json["email"].is_null()
             && let Ok(emails_resp) = http
-                .get(format!(
-                    "{}/user/emails",
-                    self.api_endpoint.trim_end_matches('/')
-                ))
+                .get(format!("{}/user/emails", self.api.trim_end_matches('/')))
                 .header("Authorization", format!("Bearer {access_token}"))
                 .header("User-Agent", "Halo-IdP")
                 .header("Accept", "application/json")

@@ -11,23 +11,23 @@ pub struct DingtalkConfig {
     pub client_secret: String,
 }
 
-pub struct DingtalkProvider {
+pub struct Dingtalk {
     config: DingtalkConfig,
-    endpoint: String,
+    api: String,
     timeout: Duration,
 }
 
-impl DingtalkProvider {
+impl Dingtalk {
     pub fn new(config: DingtalkConfig) -> Self {
         Self {
             config,
-            endpoint: "https://api.dingtalk.com".into(),
+            api: "https://api.dingtalk.com".into(),
             timeout: crate::pkg::http::DEFAULT_TIMEOUT,
         }
     }
 
-    pub fn endpoint(mut self, endpoint: impl Into<String>) -> Self {
-        self.endpoint = endpoint.into();
+    pub fn api(mut self, endpoint: impl Into<String>) -> Self {
+        self.api = endpoint.into();
         self
     }
 
@@ -57,7 +57,7 @@ impl DingtalkProvider {
         let http = crate::pkg::http::client(self.timeout)?;
         let token_url = format!(
             "{}/v1.0/oauth2/userAccessToken",
-            self.endpoint.trim_end_matches('/')
+            self.api.trim_end_matches('/')
         );
 
         let body = serde_json::json!({
@@ -86,10 +86,7 @@ impl DingtalkProvider {
         })?;
 
         // 拉取用户信息
-        let user_url = format!(
-            "{}/v1.0/contact/users/me",
-            self.endpoint.trim_end_matches('/')
-        );
+        let user_url = format!("{}/v1.0/contact/users/me", self.api.trim_end_matches('/'));
         let user_resp = http
             .get(user_url)
             .header("x-acs-dingtalk-access-token", access_token)

@@ -130,7 +130,7 @@ fn test_rsa_crypto_decrypt() {
 #[tokio::test]
 async fn test_social_and_enterprise_providers() {
     // 1. GitHub 授权跳转链接与用户数据解析
-    let gh = factor::social::GithubProvider::new(factor::social::GithubConfig {
+    let gh = factor::social::Github::new(factor::social::GithubConfig {
         client_id: "gh_client_123".into(),
         client_secret: "gh_secret_456".into(),
         scope: None,
@@ -148,13 +148,13 @@ async fn test_social_and_enterprise_providers() {
         "email": "octocat@github.com",
         "avatar_url": "https://avatars.githubusercontent.com/u/987654"
     });
-    let profile = factor::social::GithubProvider::parse(&gh_user).unwrap();
+    let profile = factor::social::Github::parse(&gh_user).unwrap();
     assert_eq!(profile.provider, "github");
     assert_eq!(profile.openid, "987654");
     assert_eq!(profile.email, Some("octocat@github.com".into()));
 
     // 2. 微信登录授权链接
-    let wx = factor::social::WechatProvider::new(factor::social::WechatConfig {
+    let wx = factor::social::Wechat::new(factor::social::WechatConfig {
         app_id: "wx123456789".into(),
         app_secret: "wxsecret".into(),
         scope: None,
@@ -164,7 +164,7 @@ async fn test_social_and_enterprise_providers() {
         .unwrap();
     assert!(wx_url.contains("appid=wx123456789"));
     assert!(wx_url.contains("#wechat_redirect"));
-    let wx_profile = factor::social::WechatProvider::parse(&serde_json::json!({
+    let wx_profile = factor::social::Wechat::parse(&serde_json::json!({
         "openid": "wx-openid",
         "unionid": "wx-unionid",
         "nickname": "WeChat User",
@@ -174,7 +174,7 @@ async fn test_social_and_enterprise_providers() {
     assert_eq!(wx_profile.openid, "wx-openid");
     assert_eq!(wx_profile.unionid.as_deref(), Some("wx-unionid"));
 
-    let google = factor::social::GoogleProvider::new(factor::social::GoogleConfig {
+    let google = factor::social::Google::new(factor::social::GoogleConfig {
         client_id: "google-client".into(),
         client_secret: "google-secret".into(),
         scope: None,
@@ -183,7 +183,7 @@ async fn test_social_and_enterprise_providers() {
         .authorize_url("state_google", "https://halo.run/oauth/google/callback")
         .unwrap();
     assert!(google_url.contains("client_id=google-client"));
-    let google_profile = factor::social::GoogleProvider::parse(&serde_json::json!({
+    let google_profile = factor::social::Google::parse(&serde_json::json!({
         "sub": "google-sub",
         "name": "Google User",
         "email": "google@example.com",
@@ -194,7 +194,7 @@ async fn test_social_and_enterprise_providers() {
     assert_eq!(google_profile.email.as_deref(), Some("google@example.com"));
 
     // 3. 企业微信与钉钉
-    let wecom = factor::enterprise::WecomProvider::new(factor::enterprise::WecomConfig {
+    let wecom = factor::enterprise::Wecom::new(factor::enterprise::WecomConfig {
         corp_id: "corp_123".into(),
         agent_id: "1000002".into(),
         corp_secret: "secret".into(),
@@ -204,7 +204,7 @@ async fn test_social_and_enterprise_providers() {
         .unwrap();
     assert!(wecom_url.contains("appid=corp_123"));
 
-    let dt = factor::enterprise::DingtalkProvider::new(factor::enterprise::DingtalkConfig {
+    let dt = factor::enterprise::Dingtalk::new(factor::enterprise::DingtalkConfig {
         client_id: "dt_app_id".into(),
         client_secret: "dt_secret".into(),
     });

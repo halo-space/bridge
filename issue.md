@@ -65,9 +65,9 @@ Magic Link 只负责签名和有效期；`redirect_to` 的允许域名、路径�
 
 注册和认证只接受 bridge 当前的结构化 state，不再兼容旧的裸 WebAuthn state；认证成功且流程尚未有身份时，会用 Passkey subject 建立 `Identity`。
 
-### 已收口：Provider endpoint 配置
+### 已收口：Provider 地址配置
 
-GitHub 增加 `api_endpoint()`，Google 增加 `userinfo_endpoint()`；测试环境和私有兼容服务可以替换 Token 之外的用户资料地址。
+GitHub 使用 `auth()` 和 `api()` 配置授权与 API 地址，Google 使用 `auth()` 和 `userinfo()` 配置授权与用户资料地址；测试环境和私有兼容服务可以替换默认地址。
 
 ### 已明确：社交和企业 Provider 的 Pipeline 边界
 

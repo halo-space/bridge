@@ -12,30 +12,30 @@ pub struct GoogleConfig {
     pub scope: Option<String>,
 }
 
-pub struct GoogleProvider {
+pub struct Google {
     config: GoogleConfig,
-    endpoint: String,
-    userinfo_endpoint: String,
+    auth: String,
+    userinfo: String,
     timeout: Duration,
 }
 
-impl GoogleProvider {
+impl Google {
     pub fn new(config: GoogleConfig) -> Self {
         Self {
             config,
-            endpoint: "https://oauth2.googleapis.com".into(),
-            userinfo_endpoint: "https://openidconnect.googleapis.com/v1/userinfo".into(),
+            auth: "https://oauth2.googleapis.com".into(),
+            userinfo: "https://openidconnect.googleapis.com/v1/userinfo".into(),
             timeout: crate::pkg::http::DEFAULT_TIMEOUT,
         }
     }
 
-    pub fn endpoint(mut self, endpoint: impl Into<String>) -> Self {
-        self.endpoint = endpoint.into();
+    pub fn auth(mut self, endpoint: impl Into<String>) -> Self {
+        self.auth = endpoint.into();
         self
     }
 
-    pub fn userinfo_endpoint(mut self, endpoint: impl Into<String>) -> Self {
-        self.userinfo_endpoint = endpoint.into();
+    pub fn userinfo(mut self, endpoint: impl Into<String>) -> Self {
+        self.userinfo = endpoint.into();
         self
     }
 
@@ -97,7 +97,7 @@ impl GoogleProvider {
     ) -> Result<SocialProfile> {
         let http = crate::pkg::http::client(self.timeout)?;
         let token_resp = http
-            .post(format!("{}/token", self.endpoint.trim_end_matches('/')))
+            .post(format!("{}/token", self.auth.trim_end_matches('/')))
             .form(&[
                 ("client_id", self.config.client_id.as_str()),
                 ("client_secret", self.config.client_secret.as_str()),
@@ -128,7 +128,7 @@ impl GoogleProvider {
             })?;
 
         let user_resp = http
-            .get(&self.userinfo_endpoint)
+            .get(&self.userinfo)
             .bearer_auth(access_token)
             .send()
             .await

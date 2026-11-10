@@ -12,23 +12,23 @@ pub struct WecomConfig {
     pub corp_secret: String,
 }
 
-pub struct WecomProvider {
+pub struct Wecom {
     config: WecomConfig,
-    endpoint: String,
+    api: String,
     timeout: Duration,
 }
 
-impl WecomProvider {
+impl Wecom {
     pub fn new(config: WecomConfig) -> Self {
         Self {
             config,
-            endpoint: "https://qyapi.weixin.qq.com".into(),
+            api: "https://qyapi.weixin.qq.com".into(),
             timeout: crate::pkg::http::DEFAULT_TIMEOUT,
         }
     }
 
-    pub fn endpoint(mut self, endpoint: impl Into<String>) -> Self {
-        self.endpoint = endpoint.into();
+    pub fn api(mut self, endpoint: impl Into<String>) -> Self {
+        self.api = endpoint.into();
         self
     }
 
@@ -58,7 +58,7 @@ impl WecomProvider {
         // 1. 获取 access_token
         let token_url = format!(
             "{}/cgi-bin/gettoken?corpid={}&corpsecret={}",
-            self.endpoint.trim_end_matches('/'),
+            self.api.trim_end_matches('/'),
             self.config.corp_id,
             self.config.corp_secret
         );
@@ -85,7 +85,7 @@ impl WecomProvider {
         // 2. 根据 code 获取 user_info
         let user_url = format!(
             "{}/cgi-bin/auth/getuserinfo?access_token={}&code={}",
-            self.endpoint.trim_end_matches('/'),
+            self.api.trim_end_matches('/'),
             access_token,
             code
         );

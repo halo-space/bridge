@@ -12,23 +12,23 @@ pub struct WechatConfig {
     pub scope: Option<String>,
 }
 
-pub struct WechatProvider {
+pub struct Wechat {
     config: WechatConfig,
-    endpoint: String,
+    api: String,
     timeout: Duration,
 }
 
-impl WechatProvider {
+impl Wechat {
     pub fn new(config: WechatConfig) -> Self {
         Self {
             config,
-            endpoint: "https://api.weixin.qq.com".into(),
+            api: "https://api.weixin.qq.com".into(),
             timeout: crate::pkg::http::DEFAULT_TIMEOUT,
         }
     }
 
-    pub fn endpoint(mut self, endpoint: impl Into<String>) -> Self {
-        self.endpoint = endpoint.into();
+    pub fn api(mut self, endpoint: impl Into<String>) -> Self {
+        self.api = endpoint.into();
         self
     }
 
@@ -82,7 +82,7 @@ impl WechatProvider {
         let http = crate::pkg::http::client(self.timeout)?;
         let mut token_url = Url::parse(&format!(
             "{}/sns/oauth2/access_token",
-            self.endpoint.trim_end_matches('/')
+            self.api.trim_end_matches('/')
         ))
         .map_err(|e| Error::Internal(e.to_string()))?;
         token_url
@@ -127,11 +127,8 @@ impl WechatProvider {
             .and_then(|value| value.as_str())
             .ok_or_else(|| Error::OAuthError("Missing WeChat openid".into()))?;
 
-        let mut user_url = Url::parse(&format!(
-            "{}/sns/userinfo",
-            self.endpoint.trim_end_matches('/')
-        ))
-        .map_err(|e| Error::Internal(e.to_string()))?;
+        let mut user_url = Url::parse(&format!("{}/sns/userinfo", self.api.trim_end_matches('/')))
+            .map_err(|e| Error::Internal(e.to_string()))?;
         user_url
             .query_pairs_mut()
             .append_pair("access_token", access_token)

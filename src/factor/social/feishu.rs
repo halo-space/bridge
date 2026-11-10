@@ -11,23 +11,23 @@ pub struct FeishuConfig {
     pub app_secret: String,
 }
 
-pub struct FeishuProvider {
+pub struct Feishu {
     config: FeishuConfig,
-    endpoint: String,
+    api: String,
     timeout: Duration,
 }
 
-impl FeishuProvider {
+impl Feishu {
     pub fn new(config: FeishuConfig) -> Self {
         Self {
             config,
-            endpoint: "https://open.feishu.cn".into(),
+            api: "https://open.feishu.cn".into(),
             timeout: crate::pkg::http::DEFAULT_TIMEOUT,
         }
     }
 
-    pub fn endpoint(mut self, endpoint: impl Into<String>) -> Self {
-        self.endpoint = endpoint.into();
+    pub fn api(mut self, endpoint: impl Into<String>) -> Self {
+        self.api = endpoint.into();
         self
     }
 
@@ -92,7 +92,7 @@ impl FeishuProvider {
         // 1. 获取 app_access_token
         let app_token_url = format!(
             "{}/open-apis/auth/v3/app_access_token/internal",
-            self.endpoint.trim_end_matches('/')
+            self.api.trim_end_matches('/')
         );
         let app_body = serde_json::json!({
             "app_id": self.config.app_id,
@@ -124,7 +124,7 @@ impl FeishuProvider {
         // 2. 换取 user_access_token
         let user_token_url = format!(
             "{}/open-apis/authen/v1/access_token",
-            self.endpoint.trim_end_matches('/')
+            self.api.trim_end_matches('/')
         );
         let user_token_body = serde_json::json!({
             "grant_type": "authorization_code",
@@ -156,7 +156,7 @@ impl FeishuProvider {
         // 3. 拉取用户信息
         let user_info_url = format!(
             "{}/open-apis/authen/v1/user_info",
-            self.endpoint.trim_end_matches('/')
+            self.api.trim_end_matches('/')
         );
         let user_resp = http
             .get(user_info_url)
