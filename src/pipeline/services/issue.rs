@@ -34,7 +34,7 @@ where
             return Ok(pass(json!({ "challenge": challenge })));
         }
         if matches!(kind, "passkey" | "webauthn") {
-            return self.issue_passkey(context).await;
+            return self.issue_passkey(node, context).await;
         }
 
         let channel = channel(kind)?;

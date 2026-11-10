@@ -59,22 +59,14 @@ impl WebAuthn {
     pub fn register(&self, input: &str, state: &str) -> Result<StoredPasskey> {
         let input: RegisterPublicKeyCredential = serde_json::from_str(input)
             .map_err(|e| crate::error::Error::WebAuthnError(e.to_string()))?;
-        let (state, subject, user_handle, display_name) =
-            match serde_json::from_str::<RegisterState>(state) {
-                Ok(state) => (
-                    state.state,
-                    Some(state.subject),
-                    Some(state.user_handle),
-                    Some(state.display_name),
-                ),
-                Err(_) => (
-                    serde_json::from_str::<PasskeyRegistration>(state)
-                        .map_err(|e| crate::error::Error::WebAuthnError(e.to_string()))?,
-                    None,
-                    None,
-                    None,
-                ),
-            };
+        let state: RegisterState = serde_json::from_str(state)
+            .map_err(|e| crate::error::Error::WebAuthnError(e.to_string()))?;
+        let RegisterState {
+            state,
+            subject,
+            user_handle,
+            display_name,
+        } = state;
         let passkey = self
             .webauthn
             .finish_passkey_registration(&input, &state)
@@ -86,15 +78,15 @@ impl WebAuthn {
         let public_key = serde_json::to_string(passkey.get_public_key())
             .map_err(|e| crate::error::Error::Internal(e.to_string()))?;
         Ok(StoredPasskey {
-            subject: subject.unwrap_or_default(),
+            subject,
             credential_id: base64::engine::general_purpose::URL_SAFE_NO_PAD
                 .encode(passkey.cred_id()),
             public_key,
             sign_count: 0,
             transports: Vec::new(),
             aaguid: None,
-            user_handle,
-            display_name,
+            user_handle: Some(user_handle),
+            display_name: Some(display_name),
             created_at: Utc::now().timestamp(),
             last_used_at: None,
             passwordless: false,
@@ -131,24 +123,16 @@ impl WebAuthn {
     pub fn verify(&self, input: &str, state: &str) -> Result<Auth> {
         let input: PublicKeyCredential = serde_json::from_str(input)
             .map_err(|e| crate::error::Error::WebAuthnError(e.to_string()))?;
-        let (state, passkeys) = match serde_json::from_str::<AuthState>(state) {
-            Ok(state) => (state.state, Some(state.passkeys)),
-            Err(_) => (
-                serde_json::from_str::<PasskeyAuthentication>(state)
-                    .map_err(|e| crate::error::Error::WebAuthnError(e.to_string()))?,
-                None,
-            ),
-        };
+        let state: AuthState = serde_json::from_str(state)
+            .map_err(|e| crate::error::Error::WebAuthnError(e.to_string()))?;
+        let AuthState { state, passkeys } = state;
         let result = self
             .webauthn
             .finish_passkey_authentication(&input, &state)
             .map_err(|e| crate::error::Error::WebAuthnError(e.to_string()))?;
         let data = passkeys
-            .and_then(|passkeys| {
-                passkeys
-                    .into_iter()
-                    .find(|passkey| passkey.cred_id() == result.cred_id())
-            })
+            .into_iter()
+            .find(|passkey| passkey.cred_id() == result.cred_id())
             .map(|mut passkey| {
                 passkey.update_credential(&result);
                 serde_json::to_string(&passkey)

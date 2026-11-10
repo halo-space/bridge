@@ -35,6 +35,8 @@ Run 序列化现在覆盖 `Context.data`、`Context.request`、`Context.meta`、
 
 `Services::supports` 已按内置检查、签发、校验、发送、审计、设备和 Passkey 能力显式声明；未配置 WebAuthn 时不会声明 Passkey 支持。自定义 Runner 仍可按自身能力覆盖 `supports`。
 
+Passkey 签发和校验只读取当前节点的 DAG payload，不再扫描整个 `Context.data` 查找 `subject`、`user_id` 或 `state`，避免并行分支之间混用认证材料。
+
 ### 已收口：授权码过期检查
 
 OIDC 换授权码时现在同时检查 `AuthCode.expires_at` 和 `Secrets` 的过期结果。
@@ -58,6 +60,8 @@ Magic Link 只负责签名和有效期；`redirect_to` 的允许域名、路径�
 ### 已收口：Passkey 使用 opaque subject
 
 `WebAuthn::issue` 使用随机 UUID 作为协议层 user handle，把调用方传入的 opaque subject 保存在注册状态和 Passkey 记录中，业务 subject 不再要求 UUID。
+
+注册和认证只接受 bridge 当前的结构化 state，不再兼容旧的裸 WebAuthn state；认证成功且流程尚未有身份时，会用 Passkey subject 建立 `Identity`。
 
 ### 已收口：Provider endpoint 配置
 

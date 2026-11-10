@@ -3,7 +3,6 @@ use serde::{Deserialize, Serialize};
 /// 持久化的 Passkey。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Passkey {
-    #[serde(default)]
     pub subject: String,
     pub credential_id: String,
     pub public_key: String,

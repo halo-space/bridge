@@ -9,18 +9,20 @@ where
     E: Events,
     D: Devices,
 {
-    pub(super) async fn issue_passkey(&self, context: &Context) -> Result<Output> {
+    pub(super) async fn issue_passkey(&self, node: &Node, context: &Context) -> Result<Output> {
         let webauthn = self
             .webauthn
             .as_ref()
             .ok_or_else(|| Error::WebAuthnError("Pipeline WebAuthn service is missing".into()))?;
-        if let Some(data) = context.data.values().rev().find(|value| {
-            value.get("user_id").is_some()
-                && value.get("name").is_some()
-                && value.get("display_name").is_some()
-        }) {
+        let data = node_data(context, node)?;
+        if data.get("name").is_some() && data.get("display_name").is_some() {
+            let subject = data
+                .get("subject")
+                .or_else(|| data.get("user_id"))
+                .and_then(Value::as_str)
+                .ok_or_else(|| Error::AuthFailed("Missing field: subject".into()))?;
             let start = webauthn.issue(
-                string(data, "user_id")?.as_str(),
+                subject,
                 string(data, "name")?.as_str(),
                 string(data, "display_name")?.as_str(),
             )?;

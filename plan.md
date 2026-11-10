@@ -141,8 +141,10 @@
 - [x] 清理 Clippy 严格检查问题
 - [x] Run 序列化覆盖 request、meta 和副作用数据的敏感字段
 - [x] 内置 Services 显式声明支持的能力码
+- [x] Passkey 节点只读取当前 DAG payload，禁止跨分支扫描认证材料
 - [x] OIDC 授权码兑换检查自身 expires_at
 - [x] Passkey 注册使用 opaque subject，不要求业务 ID 为 UUID
+- [x] Passkey 状态只使用结构化 state，并在独立登录时输出 Identity
 - [x] TokenService 拒绝无效密钥、issuer 和 TTL
 
 ## 阶段十：调用方执行边界

@@ -15,18 +15,17 @@ where
             .as_ref()
             .ok_or_else(|| Error::WebAuthnError("Pipeline WebAuthn service is missing".into()))?;
         let input = string(data, "input").or_else(|_| string(data, "credential"))?;
-        let state = string(data, "state").or_else(|_| {
-            find_string(context, "state")
-                .ok_or_else(|| Error::AuthFailed("Missing field: state".into()))
-        })?;
+        let state = string(data, "state")?;
         let auth = webauthn.verify(&input, &state)?;
         let stored = self
             .passkeys
             .find(&auth.credential_id)
             .await?
             .ok_or_else(|| Error::WebAuthnError("Passkey is not registered".into()))?;
+        if stored.subject.trim().is_empty() {
+            return Err(Error::WebAuthnError("Passkey subject is missing".into()));
+        }
         if let Some(identity) = &context.identity
-            && !stored.subject.is_empty()
             && identity.subject != stored.subject
         {
             return Err(Error::WebAuthnError("Passkey identity mismatch".into()));
@@ -54,11 +53,20 @@ where
                 "Passkey counter update lost race".into(),
             ));
         }
-        Ok(pass(json!({
+        let identity = context
+            .identity
+            .clone()
+            .or_else(|| Some(crate::types::Identity::new("passkey", stored.subject)));
+        Ok(Output::Pass {
+            routes: Vec::new(),
+            data: json!({
             "verified": true,
             "credential_id": auth.credential_id,
             "counter": auth.counter,
             "user_verified": auth.user_verified,
-        })))
+            }),
+            identity,
+            at: chrono::Utc::now().timestamp(),
+        })
     }
 }
