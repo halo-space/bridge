@@ -2,6 +2,8 @@
 
 本文是开发排查记录，面向维护代码的开发者；面向接入方的说明请先阅读 [README.md](README.md) 和 [USAGE.md](USAGE.md)。文中的 `issuer`、`sender`、`verifier` 分别表示“生成、发送、检查”。
 
+当前状态：bridge 自身的问题已收口。下文标为“调用方职责”的内容不是待修复项，而是应用接入时必须提供的数据库、缓存、HTTP 和运行时能力。
+
 ## 重构约束
 
 职责单一和简约命名约束统一记录在 [CONSTRAINTS.md](CONSTRAINTS.md)。后续拆分、命名和扩展必须先满足该文件中的约束。
@@ -85,19 +87,19 @@ GitHub 使用 `auth()` 和 `api()` 配置授权与 API 地址，Google 使用 `a
 
 Provider 已有授权地址、code 换 token、资料解析、Identity 转换和本地成功/失败 fixture；默认 `Services` 不直接持有第三方配置，也不自动维护本地账号绑定。调用方通过 Runner 接入 Provider，并自行完成 state/PKCE、Profile 到 Identity 的映射和业务登录策略。
 
-## P0
+## 已确认的实现边界
 
-### 设计边界：Pipeline 运行状态的短期输入
+### Pipeline 运行状态的短期输入由调用方保存
 
 `Run` 需要在当前节点执行期间暂存输入，才能把数据交给调用方 Runner；它已拒绝包含敏感材料的序列化，并在节点完成后清理数据。调用方如果需要更短生命周期，可以在自己的请求层先校验并立即消费输入，再向 Pipeline 提交结果。
 
-### 默认密钥和静默降级不安全
+### 默认密钥和静默降级
 
 Magic Link、未知短信供应商和 RSA 解密失败回退问题已修复；`decrypt_or_raw` 对疑似密文解密失败会直接返回错误。
 
-## P1
+## 已完成的结构整理
 
-### 可接受的结构边界：Pipeline 图校验
+### Pipeline 图校验
 
 Pipeline 根入口已拆出模型、运行状态和执行引擎；图校验目前位于执行引擎内部，但只处理图合法性，不混入认证能力。后续只有在图规则继续增长时才单独拆模块。
 
@@ -105,19 +107,19 @@ Pipeline 根入口已拆出模型、运行状态和执行引擎；图校验目�
 
 内置 Services 已拆成按能力划分的文件，并在构造时建立集中式能力表；运行时按 `type/code` 查表后进入对应实现。调用方通过 `Runner` 和 `Fallback` 增加或覆盖自定义能力，不需要修改内置分派。
 
-### OIDC Flow 职责混合
+### OIDC Flow 职责
 
 OIDC Flow 已拆成授权请求、授权码、刷新和撤销文件；PKCE、state、nonce 仍保持协议参数独立模块。
 
-### Sender 文件职责混合
+### Sender 文件职责已拆分
 
 短信门面和供应商实现已拆分到独立文件，并保持 `Tencent`、`Aliyun` 这类简约命名。
 
-### Store 契约依赖因子实现
+### Store 契约已与因子实现解耦
 
 Passkey 和 Device 数据模型已迁移到 `types`，`store::Passkeys` 和 `store::Devices` 不再依赖 `factor`，认证协议方法仍留在 `factor`。
 
-### 自定义密码算法没有接入认证因子
+### 自定义密码算法已接入认证因子
 
 密码算法已提供 `Codecs` 注册集合和 `authenticate_with` 入口；默认认证入口仍使用内置集合，调用方需要显式注入自定义集合。
 
@@ -125,23 +127,23 @@ Passkey 和 Device 数据模型已迁移到 `types`，`store::Passkeys` 和 `sto
 
 通知服务使用显式 `NotifyChannel` 入口，已移除根据目标字符串推断通道的旧方法。
 
-## P1
+## 调用方接入职责
 
-### Passkey 状态消费依赖调用方
+### Passkey 状态需要调用方保存
 
 WebAuthn 注册、认证、持久化读取、计数器 CAS、完整凭证状态更新、`last_used_at` 和错误 challenge 已有真实协议 fixture 测试。bridge 不管理 Session，认证状态的单次保存与消费仍必须由调用方通过单次凭证存储完成。
 
-## P2
+## 调用方接入项
 
-### Device 已补齐，仍需应用层存储实现
+### Device 存储由调用方实现
 
 `factor/enterprise/device.rs` 已提供设备状态、RSA-SHA256 nonce 证明、启停和时间窗口校验；`store::Devices` 提供保存、查询、更新和撤销契约。具体设备数据仍由调用方实现存储。
 
-### 审计流程接入不足
+### 非 Pipeline 入口的审计由调用方接入
 
 Pipeline 内置 `Services` 已支持 `Effect("audit")` 自动调用 `Events::record_event`。非 Pipeline 认证入口仍由应用层显式记录事件。
 
-### 能力扩展和数据隔离
+### 能力扩展和数据范围由调用方接入
 
 短信已统一为 `SmsSender` + `Sender` 适配器，所有 Pipeline 节点都可以由调用方通过 `Runner` 实现或覆盖，`Services` 只是可选默认适配器。节点输入沿 DAG payload 传递，不再依赖全局字段扫描；Device nonce 在 Pipeline 校验时单次消费。
 
@@ -153,7 +155,7 @@ Pipeline 内置 `Services` 已支持 `Effect("audit")` 自动调用 `Events::rec
 
 `Cards::schema()` 现在导出完整页面 JSON Schema 和每个 Card 的参数 Schema。编译阶段同时校验参数类型、未知参数、必填参数和敏感参数引用格式。
 
-### 节点执行策略尚未由 bridge 强制执行
+### 节点超时和跨进程副作用由调用方执行
 
 `retries` 已由 Pipeline 记录实际执行次数并限制 Runner 调用次数。`timeout` 和 `Effects` 的边界已经确定：bridge 保存策略和契约，调用方使用自己的 async runtime 中断任务，并提供跨进程原子存储。
 
