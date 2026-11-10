@@ -70,7 +70,7 @@ pub(crate) fn issue(
     user_id: Option<&str>,
     action: &str,
     redirect_to: Option<&str>,
-) -> Result<(String, String)> {
+) -> Result<(String, String, MagicLinkPayload)> {
     if config.signing_secret.trim().len() < 32 {
         return Err(Error::MagicLinkError(
             "Magic link signing secret must contain at least 32 characters".into(),
@@ -110,6 +110,7 @@ pub(crate) fn issue(
     Ok((
         token.clone(),
         format!("{}{}token={token}", config.base_url, sep),
+        payload,
     ))
 }
 

@@ -1,8 +1,12 @@
 use crate::error::{Error, Result};
 use crate::store::Secrets;
-use crate::validator::verifier::captcha::{
-    CaptchaChallenge, CaptchaType, ClickCaptcha, ImageCaptcha, RotateCaptcha, SliderCaptcha,
-};
+pub mod click;
+pub mod image;
+pub mod rotate;
+pub mod slider;
+
+pub use self::{click::Click, image::Image, rotate::Rotate, slider::Slider};
+use crate::validator::verifier::captcha::{CaptchaChallenge, CaptchaType};
 
 /// 人机验证码签发。
 pub struct Captcha {
@@ -37,7 +41,7 @@ impl Captcha {
         .await?;
         let challenge = match captcha_type {
             CaptchaType::Image => {
-                let (answer, background) = ImageCaptcha::generate(4);
+                let (answer, background) = Image::issue(4);
                 kv.set(&key, &answer, self.ttl_seconds).await?;
                 CaptchaChallenge {
                     id,
@@ -49,7 +53,7 @@ impl Captcha {
                 }
             }
             CaptchaType::Slider => {
-                let (target, background, slider, y) = SliderCaptcha::generate();
+                let (target, background, slider, y) = Slider::issue();
                 kv.set(&key, &target.to_string(), self.ttl_seconds).await?;
                 CaptchaChallenge {
                     id,
@@ -61,7 +65,7 @@ impl Captcha {
                 }
             }
             CaptchaType::Rotate => {
-                let (target, background) = RotateCaptcha::generate();
+                let (target, background) = Rotate::issue();
                 kv.set(&key, &target.to_string(), self.ttl_seconds).await?;
                 CaptchaChallenge {
                     id,
@@ -73,7 +77,7 @@ impl Captcha {
                 }
             }
             CaptchaType::Click => {
-                let (points, prompt, background) = ClickCaptcha::generate();
+                let (points, prompt, background) = Click::issue();
                 let answer =
                     serde_json::to_string(&points).map_err(|e| Error::Internal(e.to_string()))?;
                 kv.set(&key, &answer, self.ttl_seconds).await?;

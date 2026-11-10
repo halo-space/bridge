@@ -6,12 +6,15 @@ use halo::factor::passkey::Passkey;
 use halo::pkg::password::{Algorithm, Password};
 use halo::store::{Clients, Passkeys, Secrets, Users};
 use halo::types::{OAuthClient, User};
+use halo::validator::issuer::captcha::{
+    Image as IssueImage, Rotate as IssueRotate, Slider as IssueSlider,
+};
 use halo::validator::issuer::{
     Captcha as IssueCaptcha, Magic as IssueMagic, Passkey as IssuePasskey,
 };
 use halo::validator::verifier::captcha::{
-    Captcha as VerifyCaptcha, CaptchaType, CaptchaVerifyReq, ClickCaptcha, ImageCaptcha,
-    RotateCaptcha, SliderCaptcha, TargetPoint,
+    Captcha as VerifyCaptcha, CaptchaType, CaptchaVerifyReq, Click as VerifyClick,
+    Image as VerifyImage, Rotate as VerifyRotate, Slider as VerifySlider, TargetPoint,
 };
 use halo::validator::verifier::{Magic as VerifyMagic, Passkey as VerifyPasskey};
 use halo::{factor, token};
@@ -370,24 +373,24 @@ fn test_pkce_s256_verify() {
 #[test]
 fn test_captcha_units() {
     // 1. 图形验证码
-    let (code, data_uri) = ImageCaptcha::generate(4);
+    let (code, data_uri) = IssueImage::issue(4);
     assert_eq!(code.len(), 4);
     assert!(data_uri.starts_with("data:image/svg+xml;base64,"));
-    assert!(ImageCaptcha::verify(&code, &code.to_lowercase()));
-    assert!(!ImageCaptcha::verify(&code, "0000"));
+    assert!(VerifyImage::verify(&code, &code.to_lowercase()));
+    assert!(!VerifyImage::verify(&code, "0000"));
 
     // 2. 滑块验证码
-    let (target_x, bg_uri, piece_uri, _) = SliderCaptcha::generate();
+    let (target_x, bg_uri, piece_uri, _) = IssueSlider::issue();
     assert!(bg_uri.starts_with("data:image/svg+xml;base64,"));
     assert!(piece_uri.starts_with("data:image/svg+xml;base64,"));
-    assert!(SliderCaptcha::verify(target_x, target_x as i32 + 2)); // 误差2px通过
-    assert!(!SliderCaptcha::verify(target_x, target_x as i32 + 20)); // 误差20px拒绝
+    assert!(VerifySlider::verify(target_x, target_x as i32 + 2)); // 误差2px通过
+    assert!(!VerifySlider::verify(target_x, target_x as i32 + 20)); // 误差20px拒绝
 
     // 3. 旋转验证码
-    let (target_deg, rot_uri) = RotateCaptcha::generate();
+    let (target_deg, rot_uri) = IssueRotate::issue();
     assert!(rot_uri.starts_with("data:image/svg+xml;base64,"));
-    assert!(RotateCaptcha::verify(target_deg, target_deg as i32 + 3)); // 误差3度通过
-    assert!(!RotateCaptcha::verify(target_deg, target_deg as i32 + 35)); // 误差35度拒绝
+    assert!(VerifyRotate::verify(target_deg, target_deg as i32 + 3)); // 误差3度通过
+    assert!(!VerifyRotate::verify(target_deg, target_deg as i32 + 35)); // 误差35度拒绝
 
     // 4. 点选验证码
     let targets = vec![
@@ -404,8 +407,8 @@ fn test_captcha_units() {
     ];
     let correct_clicks = vec![(52, 61), (149, 78)];
     let wrong_clicks = vec![(10, 10), (149, 78)];
-    assert!(ClickCaptcha::verify(&targets, &correct_clicks));
-    assert!(!ClickCaptcha::verify(&targets, &wrong_clicks));
+    assert!(VerifyClick::verify(&targets, &correct_clicks));
+    assert!(!VerifyClick::verify(&targets, &wrong_clicks));
 }
 
 // 内存模拟 Secrets

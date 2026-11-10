@@ -167,6 +167,8 @@
 - [x] Passkey 拆分 issuer 发起和 verifier 完成校验
 - [x] Captcha 拆分挑战签发、答案校验和通过凭证签发
 - [x] Captcha 通过凭证必须绑定 verifier 的一次性成功标记
+- [x] Captcha 具体类型拆分 issuer 生成和 verifier 校验
+- [x] Device 拆分模型、nonce 签发和证明校验
 - [x] Pipeline present 检查只读取当前节点 payload
 - [x] Token、RSA、通知门面和社交静态包装完成命名收口
 

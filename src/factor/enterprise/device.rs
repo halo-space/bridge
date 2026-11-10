@@ -1,12 +1,9 @@
 pub use crate::types::Device;
 
-use crate::error::{Error, Result};
-use crate::store::Secrets;
-use base64::Engine;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use rsa::{RsaPublicKey, pkcs1v15::Pkcs1v15Sign, pkcs8::DecodePublicKey};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+
+mod issue;
+mod verify;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceProof {
@@ -46,44 +43,18 @@ impl Device {
     pub fn nonce_key(&self, nonce: &str) -> String {
         format!("device:nonce:{}:{}", self.id, nonce)
     }
-
-    /// 为设备创建一次性证明 nonce。调用方应把返回值放入认证请求。
-    pub async fn issue_nonce<K: Secrets>(&self, kv: &K, ttl_secs: u64) -> Result<String> {
-        let nonce = uuid::Uuid::new_v4().simple().to_string();
-        kv.set(&self.nonce_key(&nonce), "1", ttl_secs.max(1))
-            .await?;
-        Ok(nonce)
-    }
-
-    /// 校验设备对一次性 nonce 的 RSA-SHA256 签名。
-    pub fn verify(&self, proof: &DeviceProof, now: i64, window: i64) -> Result<()> {
-        if !self.enabled {
-            return Err(Error::AuthFailed("Device is disabled".into()));
-        }
-        if proof.device_id != self.id {
-            return Err(Error::AuthFailed("Device mismatch".into()));
-        }
-        if window < 0 || (now - proof.at).abs() > window {
-            return Err(Error::AuthFailed("Device proof expired".into()));
-        }
-        let public_key = RsaPublicKey::from_public_key_pem(&self.public_key)
-            .map_err(|e| Error::AuthFailed(format!("Invalid device public key: {e}")))?;
-        let signature = URL_SAFE_NO_PAD
-            .decode(proof.signature.trim())
-            .map_err(|e| Error::AuthFailed(format!("Invalid device signature: {e}")))?;
-        let message = format!("{}:{}:{}", self.id, proof.nonce, proof.at);
-        let digest = Sha256::digest(message.as_bytes());
-        public_key
-            .verify(Pkcs1v15Sign::new::<Sha256>(), &digest, &signature)
-            .map_err(|_| Error::AuthFailed("Invalid device proof".into()))
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::Result;
+    use crate::store::Secrets;
+    use base64::Engine;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use rand_core::OsRng;
-    use rsa::{RsaPrivateKey, pkcs1v15::Pkcs1v15Sign, pkcs8::EncodePublicKey};
+    use rsa::{RsaPrivateKey, RsaPublicKey, pkcs1v15::Pkcs1v15Sign, pkcs8::EncodePublicKey};
+    use sha2::{Digest, Sha256};
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
 

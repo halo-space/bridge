@@ -10,6 +10,13 @@ pub enum CaptchaType {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TargetPoint {
+    pub char: char,
+    pub x: u32,
+    pub y: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CaptchaChallenge {
     pub id: String,
     pub captcha_type: CaptchaType,

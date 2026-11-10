@@ -11,7 +11,8 @@ impl Magic {
         user_id: Option<&str>,
         scene: &str,
     ) -> Result<(String, String)> {
-        magic::issue(&config, email, user_id, scene, None)
+        let (token, url, _) = magic::issue(&config, email, user_id, scene, None)?;
+        Ok((token, url))
     }
 
     pub async fn create<K: Secrets>(
@@ -21,8 +22,7 @@ impl Magic {
         user_id: Option<&str>,
         scene: &str,
     ) -> Result<(String, String)> {
-        let (token, url) = magic::issue(&config, email, user_id, scene, None)?;
-        let payload = magic::verify(&config, &token)?;
+        let (token, url, payload) = magic::issue(&config, email, user_id, scene, None)?;
         kv.set(&magic::key(&payload), &token, magic::ttl(&payload))
             .await?;
         Ok((token, url))

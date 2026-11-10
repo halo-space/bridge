@@ -30,9 +30,10 @@ src/
 │   └── passkey.rs          # Passkey 因子入口
 ├── validator/              # 认证材料的签发、发送和校验
 │   ├── issuer/
+│   │   └── captcha/      # 图形、滑块、旋转、点选验证码签发
 │   ├── sender/
 │   │   └── sms/          # 短信门面、阿里云、腾讯云和未知供应商错误适配
-│   └── verifier/
+│   └── verifier/         # 验证码、TOTP、Passkey 等校验
 ├── types/                  # 身份、认证结果、用户、OAuth、因子模型
 │   ├── passkey.rs          # 持久化 Passkey 模型
 │   └── device.rs           # 持久化 Device 模型

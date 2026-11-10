@@ -1,5 +1,5 @@
 use super::types::{CaptchaType, CaptchaVerifyReq};
-use super::{ClickCaptcha, ImageCaptcha, RotateCaptcha, SliderCaptcha, TargetPoint};
+use super::{Click, Image, Rotate, Slider, TargetPoint};
 use crate::error::{Error, Result};
 use crate::store::Secrets;
 
@@ -55,23 +55,23 @@ impl Captcha {
         };
 
         let passed = match req.captcha_type {
-            CaptchaType::Image => ImageCaptcha::verify(&answer, req.text.as_deref().unwrap_or("")),
+            CaptchaType::Image => Image::verify(&answer, req.text.as_deref().unwrap_or("")),
             CaptchaType::Slider => {
                 let target: u32 = answer
                     .parse()
                     .map_err(|_| Error::Internal("Corrupted slider challenge answer".into()))?;
-                SliderCaptcha::verify(target, req.offset_x.unwrap_or(0))
+                Slider::verify(target, req.offset_x.unwrap_or(0))
             }
             CaptchaType::Rotate => {
                 let target: u32 = answer
                     .parse()
                     .map_err(|_| Error::Internal("Corrupted rotate challenge answer".into()))?;
-                RotateCaptcha::verify(target, req.angle.unwrap_or(0))
+                Rotate::verify(target, req.angle.unwrap_or(0))
             }
             CaptchaType::Click => {
                 let targets: Vec<TargetPoint> = serde_json::from_str(&answer)
                     .map_err(|_| Error::Internal("Corrupted click challenge answer".into()))?;
-                ClickCaptcha::verify(&targets, req.points.as_deref().unwrap_or(&[]))
+                Click::verify(&targets, req.points.as_deref().unwrap_or(&[]))
             }
         };
 
