@@ -27,7 +27,17 @@ impl Email {
         email: &str,
         code: &str,
     ) -> Result<User> {
-        let key = CodeIssuer::key(Self::SCENE, email);
+        Self::authenticate_scene(user_store, kv, email, code, Self::SCENE).await
+    }
+
+    pub async fn authenticate_scene<U: Users, K: Secrets>(
+        user_store: &U,
+        kv: &K,
+        email: &str,
+        code: &str,
+        scene: &str,
+    ) -> Result<User> {
+        let key = CodeIssuer::key(scene, email);
         Passcode::take(kv, &key, code).await?;
 
         let user = user_store

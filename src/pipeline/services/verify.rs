@@ -25,13 +25,25 @@ where
         if kind == "sms" || kind == "code.sms" {
             let phone = string(data, "phone")?;
             let code = string(data, "code")?;
-            let user = SmsCode::authenticate(&self.users, &self.secrets, &phone, &code).await?;
+            let scene = data
+                .get("scene")
+                .and_then(Value::as_str)
+                .unwrap_or(SmsCode::SCENE);
+            let user =
+                SmsCode::authenticate_scene(&self.users, &self.secrets, &phone, &code, scene)
+                    .await?;
             return Ok(identity_pass(user));
         }
         if kind == "email" || kind == "code.email" {
             let email = string(data, "email")?;
             let code = string(data, "code")?;
-            let user = EmailCode::authenticate(&self.users, &self.secrets, &email, &code).await?;
+            let scene = data
+                .get("scene")
+                .and_then(Value::as_str)
+                .unwrap_or(EmailCode::SCENE);
+            let user =
+                EmailCode::authenticate_scene(&self.users, &self.secrets, &email, &code, scene)
+                    .await?;
             return Ok(identity_pass(user));
         }
         if kind == "totp" {

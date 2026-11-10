@@ -27,7 +27,17 @@ impl Sms {
         phone: &str,
         code: &str,
     ) -> Result<User> {
-        let key = CodeIssuer::key(Self::SCENE, phone);
+        Self::authenticate_scene(user_store, kv, phone, code, Self::SCENE).await
+    }
+
+    pub async fn authenticate_scene<U: Users, K: Secrets>(
+        user_store: &U,
+        kv: &K,
+        phone: &str,
+        code: &str,
+        scene: &str,
+    ) -> Result<User> {
+        let key = CodeIssuer::key(scene, phone);
         Passcode::take(kv, &key, code).await?;
 
         let user = user_store

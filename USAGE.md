@@ -142,6 +142,8 @@ let cards = Cards::new()
     // Effect 表示“产生外部副作用”。
     // 这里允许页面配置短信发送节点。
     .add(Op::Effect, "sms.send")
+    // 允许页面配置审计副作用节点。
+    .add(Op::Effect, "audit")
     // 给 password 能力声明一个可选的字符串参数 source。
     // required=false：页面可以不填；secret=false：它不是密钥引用。
     .arg(Op::Verify, "password", "source", "string", false, false)

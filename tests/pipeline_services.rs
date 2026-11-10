@@ -219,7 +219,9 @@ async fn pipeline_runs_captcha_sms_and_audit_without_node_dispatch_in_app() {
             Node::verify("captcha_verify", "captcha.slider")
                 .edge(None::<String>, "issue")
                 .limit(3),
-            Node::issue("issue", "sms").edge(None::<String>, "send"),
+            Node::issue("issue", "sms")
+                .args(serde_json::json!({ "scene": "signin" }))
+                .edge(None::<String>, "send"),
             Node::effect("send", "sms.send").edge(None::<String>, "code"),
             Node::input("code", vec!["code".into()]).edge(None::<String>, "verify"),
             Node::verify("verify", "sms").edge(None::<String>, "audit"),
@@ -279,7 +281,7 @@ async fn pipeline_runs_captcha_sms_and_audit_without_node_dispatch_in_app() {
     assert!(matches!(progress, Progress::Need { ref node, .. } if node == "code"));
 
     let code = secrets
-        .get_sync("code:login_sms:13800138000")
+        .get_sync("code:signin:13800138000")
         .expect("pipeline issued a code");
     let progress = pipeline
         .resume(

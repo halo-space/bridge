@@ -37,6 +37,8 @@ Run 序列化现在覆盖 `Context.data`、`Context.request`、`Context.meta`、
 
 Passkey 签发和校验只读取当前节点的 DAG payload，不再扫描整个 `Context.data` 查找 `subject`、`user_id` 或 `state`，避免并行分支之间混用认证材料。
 
+短信和邮件验证码的 `scene` 已从签发节点沿 payload 传递到发送和校验节点；自定义场景不会再被 verifier 固定覆盖成 `login_sms` 或 `login_email`。
+
 ### 已收口：授权码过期检查
 
 OIDC 换授权码时现在同时检查 `AuthCode.expires_at` 和 `Secrets` 的过期结果。

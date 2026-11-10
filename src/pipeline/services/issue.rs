@@ -39,11 +39,16 @@ where
 
         let channel = channel(kind)?;
         let target = target(context, node, channel)?;
-        let scene = if channel == "email" {
-            "login_email"
-        } else {
-            "login_sms"
-        };
+        let scene = node
+            .args
+            .get("scene")
+            .and_then(Value::as_str)
+            .filter(|scene| !scene.trim().is_empty())
+            .unwrap_or(if channel == "email" {
+                "login_email"
+            } else {
+                "login_sms"
+            });
         let key = CodeIssuer::key(scene, &target);
         CodeIssuer::issue(&self.secrets, &key, self.code_ttl, self.code_digits).await?;
         Ok(pass(json!({

@@ -46,6 +46,7 @@ where
                 NotifyChannel::Sms => "sms",
             },
             "target": target,
+            "scene": scene,
         })))
     }
 }
