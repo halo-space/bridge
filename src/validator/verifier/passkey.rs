@@ -4,18 +4,17 @@ use base64::Engine;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use url::Url;
-use uuid::Uuid;
 use webauthn_rs::prelude::{
     Passkey as NativePasskey, PasskeyAuthentication, PasskeyRegistration, PublicKeyCredential,
     RegisterPublicKeyCredential, Webauthn, WebauthnBuilder,
 };
 
-/// 标准 WebAuthn 注册和认证。
-pub struct WebAuthn {
+/// Passkey 注册结果和认证结果校验器。
+pub struct Passkey {
     webauthn: Webauthn,
 }
 
-impl WebAuthn {
+impl Passkey {
     pub fn new(rp_id: &str, origin: &str, name: &str) -> Result<Self> {
         let origin =
             Url::parse(origin).map_err(|e| crate::error::Error::WebAuthnError(e.to_string()))?;
@@ -28,34 +27,7 @@ impl WebAuthn {
         Ok(Self { webauthn })
     }
 
-    pub fn issue(&self, user_id: &str, name: &str, display_name: &str) -> Result<Start> {
-        if user_id.trim().is_empty() {
-            return Err(crate::error::Error::WebAuthnError(
-                "User subject cannot be empty".into(),
-            ));
-        }
-        // webauthn-rs requires a UUID user handle. Keep the caller's opaque
-        // subject in the registration state and use a random handle for the
-        // protocol-level value.
-        let user_handle = Uuid::new_v4();
-        let (options, state) = self
-            .webauthn
-            .start_passkey_registration(user_handle, name, display_name, None)
-            .map_err(|e| crate::error::Error::WebAuthnError(e.to_string()))?;
-        let state = RegisterState {
-            state,
-            subject: user_id.to_string(),
-            user_handle: user_handle.to_string(),
-            display_name: display_name.to_string(),
-        };
-        Ok(Start {
-            options: serde_json::to_value(options)
-                .map_err(|e| crate::error::Error::Internal(e.to_string()))?,
-            state: serde_json::to_string(&state)
-                .map_err(|e| crate::error::Error::Internal(e.to_string()))?,
-        })
-    }
-
+    /// 校验注册结果并转换为调用方可保存的凭证模型。
     pub fn register(&self, input: &str, state: &str) -> Result<StoredPasskey> {
         let input: RegisterPublicKeyCredential = serde_json::from_str(input)
             .map_err(|e| crate::error::Error::WebAuthnError(e.to_string()))?;
@@ -97,29 +69,7 @@ impl WebAuthn {
         })
     }
 
-    pub fn request(&self, passkeys: &[StoredPasskey]) -> Result<Start> {
-        let passkeys: Vec<NativePasskey> = passkeys
-            .iter()
-            .map(|passkey| {
-                let data = passkey.data.as_deref().ok_or_else(|| {
-                    crate::error::Error::WebAuthnError("Missing Passkey data".into())
-                })?;
-                serde_json::from_str(data)
-                    .map_err(|e| crate::error::Error::WebAuthnError(e.to_string()))
-            })
-            .collect::<Result<Vec<_>>>()?;
-        let (options, state) = self
-            .webauthn
-            .start_passkey_authentication(&passkeys)
-            .map_err(|e| crate::error::Error::WebAuthnError(e.to_string()))?;
-        Ok(Start {
-            options: serde_json::to_value(options)
-                .map_err(|e| crate::error::Error::Internal(e.to_string()))?,
-            state: serde_json::to_string(&AuthState { state, passkeys })
-                .map_err(|e| crate::error::Error::Internal(e.to_string()))?,
-        })
-    }
-
+    /// 校验认证结果并返回计数器和最新凭证状态。
     pub fn verify(&self, input: &str, state: &str) -> Result<Auth> {
         let input: PublicKeyCredential = serde_json::from_str(input)
             .map_err(|e| crate::error::Error::WebAuthnError(e.to_string()))?;
@@ -165,12 +115,6 @@ struct RegisterState {
 struct AuthState {
     state: PasskeyAuthentication,
     passkeys: Vec<NativePasskey>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Start {
-    pub options: serde_json::Value,
-    pub state: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

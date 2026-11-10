@@ -1,19 +1,19 @@
 use crate::error::Result;
-use crate::pkg::totp::Totp;
+use crate::pkg::totp::Totp as Algorithm;
 
 /// TOTP Secret 签发。
-pub struct TotpIssuer;
+pub struct Totp;
 
-impl TotpIssuer {
+impl Totp {
     pub fn secret() -> String {
-        Totp::generate_secret()
+        Algorithm::generate_secret()
     }
 
     pub fn uri(issuer: &str, account: &str, secret: &str) -> Result<String> {
-        Totp::generate_otpauth_uri(issuer, account, secret)
+        Algorithm::generate_otpauth_uri(issuer, account, secret)
     }
 
     pub fn qr(secret_uri: &str) -> Result<String> {
-        Totp::generate_qr_data_uri(secret_uri)
+        Algorithm::generate_qr_data_uri(secret_uri)
     }
 }

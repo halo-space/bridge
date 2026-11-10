@@ -1,6 +1,6 @@
 use super::*;
 
-impl OidcFlow {
+impl Flow {
     /// 校验 PKCE code_verifier 与 code_challenge (RFC 7636)
     pub fn verify_pkce(verifier: &str, challenge: &str, method: Option<&str>) -> Result<()> {
         Pkce::check(verifier, challenge, method)

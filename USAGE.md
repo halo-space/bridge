@@ -63,6 +63,8 @@ Pipeline 是登录流程图。它只知道节点、边、路由、汇聚、重�
 - `sender`：把已经生成的内容发送到短信、邮件等通道。
 - `verifier`：校验验证码、TOTP、PKCE、state、nonce、Passkey 等材料。
 
+同名能力通过模块路径区分，例如使用 `validator::issuer::Captcha` 生成挑战，使用 `validator::verifier::Captcha` 校验挑战；`issuer::Passkey` 负责发起浏览器流程，`verifier::Passkey` 负责完成校验。
+
 例如手机号登录通常拆成：
 
 ```text
@@ -562,6 +564,8 @@ let pipeline = Pipeline::new(
 
 ### 5.4 密码加 Passkey
 
+Passkey 使用两个独立类型：`validator::issuer::Passkey` 负责发起，`validator::verifier::Passkey` 负责完成校验。
+
 Passkey 通常分成签发注册/认证选项和校验浏览器返回值：
 
 ```text
@@ -571,7 +575,7 @@ Passkey 通常分成签发注册/认证选项和校验浏览器返回值：
 4. 返回 `Done`
 ```
 
-`issue(webauthn)` 只生成浏览器需要的 options 和 state；它不是校验。`verify(passkey)` 才会验证签名、challenge、凭证 ID 和计数器，并把新的计数器交给 `Passkeys::update` 保存。
+`issue(webauthn)` 只生成浏览器需要的 options 和 state；它不是校验。`verify(passkey)` 才会验证签名、challenge、凭证 ID 和计数器，并把新的计数器交给 `Passkeys::update` 保存。两个步骤由不同的 Passkey 类型提供。
 
 调用方负责：
 

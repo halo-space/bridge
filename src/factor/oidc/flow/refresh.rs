@@ -1,11 +1,11 @@
 use super::*;
 
-impl OidcFlow {
+impl Flow {
     /// 校验并处理 Refresh Token 换发 (grant_type=refresh_token)
     pub async fn exchange_refresh_token<C: Clients, U: Users, K: Secrets>(
         client_store: &C,
         user_store: &U,
-        token_service: &TokenService,
+        token: &Token,
         kv: &K,
         req: &TokenRequest,
     ) -> Result<(String, String)> {
@@ -47,7 +47,7 @@ impl OidcFlow {
             return Err(Error::TokenError("Refresh token revoked".into()));
         }
 
-        let claims = token_service.verify_refresh(refresh_token)?;
+        let claims = token.verify_refresh(refresh_token)?;
         if claims.aud.as_deref() != Some(req.client_id.as_str()) {
             return Err(Error::InvalidClient("Refresh token client mismatch".into()));
         }
@@ -64,7 +64,7 @@ impl OidcFlow {
             return Err(Error::UserDisabled);
         }
 
-        let tokens = token_service.renew(refresh_token)?;
+        let tokens = token.renew(refresh_token)?;
         Self::revoke_token(
             kv,
             refresh_token,

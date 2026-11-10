@@ -6,11 +6,11 @@ pub mod passkey;
 pub mod recovery;
 pub mod totp;
 
-pub use captcha::{CaptchaChallenge, CaptchaType, CaptchaVerifier, CaptchaVerifyReq};
+pub use captcha::{Captcha, CaptchaChallenge, CaptchaType, CaptchaVerifyReq};
 pub use magic::Magic;
 pub use passcode::Passcode;
 #[cfg(feature = "passkey")]
-pub use passkey::{Start, WebAuthn};
+pub use passkey::{Auth, Passkey};
 pub use recovery::Recovery;
 pub use totp::Totp;
 

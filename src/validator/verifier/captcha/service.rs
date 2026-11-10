@@ -3,26 +3,24 @@ use super::{ClickCaptcha, ImageCaptcha, RotateCaptcha, SliderCaptcha, TargetPoin
 use crate::error::{Error, Result};
 use crate::store::Secrets;
 
-pub struct CaptchaVerifier {
-    ttl_token_seconds: u64,
+pub struct Captcha {
     max_attempts: u32,
 }
 
-impl Default for CaptchaVerifier {
+impl Default for Captcha {
     fn default() -> Self {
-        Self::new(300, 5)
+        Self::new(5)
     }
 }
 
-impl CaptchaVerifier {
-    pub fn new(ttl_token_seconds: u64, max_attempts: u32) -> Self {
+impl Captcha {
+    pub fn new(max_attempts: u32) -> Self {
         Self {
-            ttl_token_seconds,
             max_attempts: max_attempts.max(1),
         }
     }
 
-    pub async fn verify<K: Secrets>(&self, kv: &K, req: &CaptchaVerifyReq) -> Result<String> {
+    pub async fn verify<K: Secrets>(&self, kv: &K, req: &CaptchaVerifyReq) -> Result<()> {
         let key = format!("cap:{}", req.id);
         let attempts_key = format!("cap:attempts:{}", req.id);
         let type_key = format!("cap:type:{}", req.id);
@@ -99,13 +97,11 @@ impl CaptchaVerifier {
         kv.del(&attempts_key).await?;
         kv.del(&type_key).await?;
 
-        let token = format!("cpt_{}", uuid::Uuid::new_v4().simple());
-        kv.set(&format!("cpt:{token}"), "1", self.ttl_token_seconds)
-            .await?;
-        Ok(token)
+        Ok(())
     }
 
-    pub async fn token<K: Secrets>(&self, kv: &K, token: &str) -> Result<bool> {
+    /// 原子消费由 issuer 签发的短期通过凭证。
+    pub async fn take<K: Secrets>(&self, kv: &K, token: &str) -> Result<bool> {
         Ok(kv.take(&format!("cpt:{token}")).await?.is_some())
     }
 }

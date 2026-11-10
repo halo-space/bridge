@@ -17,10 +17,10 @@ pub(crate) fn same(left: &str, right: &str) -> bool {
     diff == 0
 }
 
-pub use flow::{AuthorizeRequest, OidcFlow, TokenRequest};
+pub use flow::{AuthorizeRequest, Flow, TokenRequest};
 pub use server::{
     IntrospectRequest, IntrospectResponse, OidcDiscovery, RevokeRequest, TokenResponse,
     UserInfoResponse,
 };
 
-pub use provider::{OidcConfig, OidcProfile, OidcProvider};
+pub use provider::{OidcConfig, Profile, Provider};

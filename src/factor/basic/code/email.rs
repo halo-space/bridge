@@ -2,7 +2,7 @@ use crate::error::{Error, Result};
 use crate::store::{Secrets, Users};
 use crate::types::User;
 use crate::types::{AuthResult, Level, Method};
-use crate::validator::issuer::CodeIssuer;
+use crate::validator::issuer::Code;
 use crate::validator::verifier::passcode::Passcode;
 
 /// 邮箱 + 一次性验证码登录。
@@ -37,7 +37,7 @@ impl Email {
         code: &str,
         scene: &str,
     ) -> Result<User> {
-        let key = CodeIssuer::key(scene, email);
+        let key = Code::key(scene, email);
         Passcode::take(kv, &key, code).await?;
 
         let user = user_store

@@ -1,5 +1,5 @@
 use crate::error::Result;
-use crate::factor::basic::magic::{MagicLinkConfig, MagicLinkService};
+use crate::factor::basic::magic::{self, MagicLinkConfig};
 use crate::store::Secrets;
 
 pub struct Magic;
@@ -11,7 +11,7 @@ impl Magic {
         user_id: Option<&str>,
         scene: &str,
     ) -> Result<(String, String)> {
-        MagicLinkService::new(config).create_magic_link(email, user_id, scene, None)
+        magic::issue(&config, email, user_id, scene, None)
     }
 
     pub async fn create<K: Secrets>(
@@ -21,8 +21,10 @@ impl Magic {
         user_id: Option<&str>,
         scene: &str,
     ) -> Result<(String, String)> {
-        MagicLinkService::new(config)
-            .create(kv, email, user_id, scene, None)
-            .await
+        let (token, url) = magic::issue(&config, email, user_id, scene, None)?;
+        let payload = magic::verify(&config, &token)?;
+        kv.set(&magic::key(&payload), &token, magic::ttl(&payload))
+            .await?;
+        Ok((token, url))
     }
 }

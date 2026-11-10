@@ -8,7 +8,7 @@ pub use github::{Github, GithubConfig};
 pub use google::{Google, GoogleConfig};
 pub use wechat::{Wechat, WechatConfig};
 
-use crate::types::{AuthResult, Identity, Level, Method};
+use crate::types::Identity;
 use serde::{Deserialize, Serialize};
 
 /// 社交平台返回的标准身份资料。
@@ -34,17 +34,5 @@ impl From<SocialProfile> for Identity {
             phone: profile.phone,
             name: profile.nickname.or(profile.username),
         }
-    }
-}
-
-pub struct SocialAuth;
-
-impl SocialAuth {
-    pub fn identity(profile: SocialProfile) -> Identity {
-        profile.into()
-    }
-
-    pub fn result(profile: SocialProfile) -> AuthResult {
-        AuthResult::new(Self::identity(profile), Method::Social, Level::First)
     }
 }

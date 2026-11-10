@@ -6,6 +6,11 @@
 
 ## 本批次已修复
 
+- 公共 API 已按模块上下文收敛：issuer、verifier、OIDC、Token、RSA 和通知类型不再重复添加职责后缀；旧名称不保留兼容别名。
+- Magic Link 已拆分为纯载荷/签名核心、issuer 签发和 verifier 校验消费；核心不再访问 Secrets。
+- Passkey 已拆分为 `validator::issuer::Passkey` 和 `validator::verifier::Passkey`，Pipeline 分别注入发起器和校验器。
+- Captcha verifier 只校验并消费挑战；短期通过凭证由 Captcha issuer 单独签发，Pipeline 仍保持原有执行结果。
+- 社交静态认证包装已移除，社交 Profile 通过已有转换实现交给调用方处理。
 - `Run` 在包含密码、验证码、TOTP、Token、Passkey 输入等敏感材料时拒绝序列化；完成节点后会清理当前数据和分支 payload，审计证据只保留清理后的数据。
 - Magic Link 默认密钥改为随机值，配置序列化不会输出签名密钥。
 - 未知短信供应商返回明确错误，不再静默使用 Mock；通知服务增加显式 `NotifyChannel` 入口。
@@ -33,7 +38,7 @@ Run 序列化现在覆盖 `Context.data`、`Context.request`、`Context.meta`、
 
 ### 已收口：Services 能力声明
 
-`Services::supports` 已按内置检查、签发、校验、发送、审计、设备和 Passkey 能力显式声明；未配置 WebAuthn 时不会声明 Passkey 支持。自定义 Runner 仍可按自身能力覆盖 `supports`。
+`Services::supports` 已按内置检查、签发、校验、发送、审计、设备和 Passkey 能力显式声明；未同时配置 Passkey issuer 和 verifier 时不会声明 Passkey 支持。自定义 Runner 仍可按自身能力覆盖 `supports`。
 
 Passkey 签发和校验只读取当前节点的 DAG payload，不再扫描整个 `Context.data` 查找 `subject`、`user_id` 或 `state`，避免并行分支之间混用认证材料。
 
@@ -55,13 +60,13 @@ GitHub、Google、微信、飞书、企业微信和钉钉 Provider 现在通过�
 
 Magic Link 只负责签名和有效期；`redirect_to` 的允许域名、路径和动作策略必须由调用方在签发前校验，bridge 不拥有业务站点白名单。
 
-### 已收口：TokenService 配置校验
+### 已收口：Token 配置校验
 
 签发和校验入口现在会拒绝空 issuer、短 HS256 密钥、非正 TTL 以及不完整的 RSA 密钥配置。
 
 ### 已收口：Passkey 使用 opaque subject
 
-`WebAuthn::issue` 使用随机 UUID 作为协议层 user handle，把调用方传入的 opaque subject 保存在注册状态和 Passkey 记录中，业务 subject 不再要求 UUID。
+`validator::issuer::Passkey::issue` 使用随机 UUID 作为协议层 user handle，把调用方传入的 opaque subject 保存在注册状态和 Passkey 记录中，业务 subject 不再要求 UUID。
 
 注册和认证只接受 bridge 当前的结构化 state，不再兼容旧的裸 WebAuthn state；认证成功且流程尚未有身份时，会用 Passkey subject 建立 `Identity`。
 

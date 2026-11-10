@@ -10,13 +10,13 @@ where
     D: Devices,
 {
     pub(super) async fn verify_passkey(&self, context: &Context, data: &Value) -> Result<Output> {
-        let webauthn = self
-            .webauthn
+        let passkey = self
+            .passkey_verify
             .as_ref()
-            .ok_or_else(|| Error::WebAuthnError("Pipeline WebAuthn service is missing".into()))?;
+            .ok_or_else(|| Error::WebAuthnError("Pipeline Passkey verifier is missing".into()))?;
         let input = string(data, "input").or_else(|_| string(data, "credential"))?;
         let state = string(data, "state")?;
-        let auth = webauthn.verify(&input, &state)?;
+        let auth = passkey.verify(&input, &state)?;
         let stored = self
             .passkeys
             .find(&auth.credential_id)

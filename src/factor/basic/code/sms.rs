@@ -2,7 +2,7 @@ use crate::error::{Error, Result};
 use crate::store::{Secrets, Users};
 use crate::types::User;
 use crate::types::{AuthResult, Level, Method};
-use crate::validator::issuer::CodeIssuer;
+use crate::validator::issuer::Code;
 use crate::validator::verifier::passcode::Passcode;
 
 /// 手机号 + 短信验证码登录。
@@ -37,7 +37,7 @@ impl Sms {
         code: &str,
         scene: &str,
     ) -> Result<User> {
-        let key = CodeIssuer::key(scene, phone);
+        let key = Code::key(scene, phone);
         Passcode::take(kv, &key, code).await?;
 
         let user = user_store

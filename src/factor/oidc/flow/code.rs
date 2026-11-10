@@ -1,6 +1,6 @@
 use super::*;
 
-impl OidcFlow {
+impl Flow {
     /// 生成授权码并存入缓存
     #[allow(clippy::too_many_arguments)]
     pub async fn issue_code<K: Secrets>(

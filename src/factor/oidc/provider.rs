@@ -5,19 +5,19 @@ use crate::types::Identity;
 use serde_json::Value;
 
 pub use config::OidcConfig;
-pub use profile::OidcProfile;
+pub use profile::Profile;
 
-pub struct OidcProvider {
+pub struct Provider {
     pub config: OidcConfig,
 }
 
-impl OidcProvider {
+impl Provider {
     pub fn new(config: OidcConfig) -> Self {
         Self { config }
     }
 
-    pub fn profile(&self, claims: &Value) -> Option<OidcProfile> {
-        Some(OidcProfile {
+    pub fn profile(&self, claims: &Value) -> Option<Profile> {
+        Some(Profile {
             provider: self.config.issuer.clone(),
             subject: claims.get("sub")?.as_str()?.to_string(),
             email: claims

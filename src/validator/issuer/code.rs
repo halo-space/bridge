@@ -27,9 +27,9 @@ impl Scene {
 }
 
 /// 一次性验证码签发。
-pub struct CodeIssuer;
+pub struct Code;
 
-impl CodeIssuer {
+impl Code {
     pub fn key(scene: &str, target: &str) -> String {
         format!("code:{scene}:{target}")
     }

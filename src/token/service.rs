@@ -5,7 +5,7 @@ use crate::types::User;
 use chrono::Utc;
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
 
-pub struct TokenService {
+pub struct Token {
     secret: String,
     rsa_private_pem: Option<String>,
     rsa_public_pem: Option<String>,
@@ -14,7 +14,7 @@ pub struct TokenService {
     refresh_token_ttl: i64,
 }
 
-impl TokenService {
+impl Token {
     pub fn new(
         secret: impl Into<String>,
         issuer: impl Into<String>,
@@ -31,7 +31,7 @@ impl TokenService {
         }
     }
 
-    /// 构造支持 RS256 非对称签名的 TokenService
+    /// 构造支持 RS256 非对称签名的 Token
     pub fn with_rsa_pem(
         issuer: impl Into<String>,
         access_token_ttl: i64,

@@ -1,11 +1,15 @@
-pub use captcha::CaptchaIssuer;
+pub use captcha::Captcha;
 pub mod captcha;
 pub mod code;
 pub mod magic;
+#[cfg(feature = "passkey")]
+pub mod passkey;
 pub mod recovery;
 pub mod totp;
 
-pub use code::{CodeIssuer, Scene};
+pub use code::{Code, Scene};
 pub use magic::Magic;
-pub use recovery::RecoveryIssuer;
-pub use totp::TotpIssuer;
+#[cfg(feature = "passkey")]
+pub use passkey::{Passkey, Start};
+pub use recovery::Recovery;
+pub use totp::Totp;

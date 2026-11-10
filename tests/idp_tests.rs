@@ -1,17 +1,20 @@
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use halo::factor::basic::magic::{MagicLinkConfig, MagicLinkService};
+use halo::factor::basic::magic::MagicLinkConfig;
 use halo::factor::oidc;
 use halo::factor::passkey::Passkey;
 use halo::pkg::password::{Algorithm, Password};
 use halo::store::{Clients, Passkeys, Secrets, Users};
 use halo::types::{OAuthClient, User};
-use halo::validator::issuer::CaptchaIssuer;
-use halo::validator::verifier::captcha::{
-    CaptchaType, CaptchaVerifier, CaptchaVerifyReq, ClickCaptcha, ImageCaptcha, RotateCaptcha,
-    SliderCaptcha, TargetPoint,
+use halo::validator::issuer::{
+    Captcha as IssueCaptcha, Magic as IssueMagic, Passkey as IssuePasskey,
 };
-use halo::{WebAuthn, factor, token};
+use halo::validator::verifier::captcha::{
+    Captcha as VerifyCaptcha, CaptchaType, CaptchaVerifyReq, ClickCaptcha, ImageCaptcha,
+    RotateCaptcha, SliderCaptcha, TargetPoint,
+};
+use halo::validator::verifier::{Magic as VerifyMagic, Passkey as VerifyPasskey};
+use halo::{factor, token};
 use saml::InMemoryReplayCache;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -118,13 +121,13 @@ fn test_password_algorithms_and_unknown_code() {
 
 #[test]
 fn test_rsa_crypto_decrypt() {
-    use halo::pkg::rsa::RsaCrypto;
-    let pem = RsaCrypto::global().public_pem();
+    use halo::pkg::rsa::Rsa;
+    let pem = Rsa::global().public_pem();
     assert!(pem.contains("-----BEGIN PUBLIC KEY-----"));
 
     // Test raw string fallback
     let raw = "admin123";
-    assert_eq!(RsaCrypto::decrypt_or_raw(raw).unwrap(), "admin123");
+    assert_eq!(Rsa::decrypt_or_raw(raw).unwrap(), "admin123");
 }
 
 #[tokio::test]
@@ -256,7 +259,7 @@ async fn test_social_and_enterprise_providers() {
 
 #[test]
 fn test_token_issue_and_verify() {
-    let service = token::TokenService::new(
+    let service = token::Token::new(
         "my-super-secret-key-that-is-long-enough-32bytes",
         "halo-idp",
         3600,
@@ -311,7 +314,7 @@ fn test_token_issue_and_verify_rs256_and_jwks() {
     let pub_pem_str =
         rsa::pkcs8::EncodePublicKey::to_public_key_pem(&pub_key, LineEnding::LF).unwrap();
 
-    let service = token::TokenService::with_rsa_pem(
+    let service = token::Token::with_rsa_pem(
         "https://aiwiki.vip",
         3600,
         86400,
@@ -360,8 +363,8 @@ fn test_pkce_s256_verify() {
     hasher.update(verifier.as_bytes());
     let challenge = URL_SAFE_NO_PAD.encode(hasher.finalize());
 
-    assert!(oidc::OidcFlow::verify_pkce(verifier, &challenge, Some("S256")).is_ok());
-    assert!(oidc::OidcFlow::verify_pkce("wrong_verifier", &challenge, Some("S256")).is_err());
+    assert!(oidc::Flow::verify_pkce(verifier, &challenge, Some("S256")).is_ok());
+    assert!(oidc::Flow::verify_pkce("wrong_verifier", &challenge, Some("S256")).is_err());
 }
 
 #[test]
@@ -613,7 +616,7 @@ async fn test_passkey_counter_update_is_compare_and_set() {
 
 #[test]
 fn test_passkey_state_and_missing_data() {
-    let webauthn = WebAuthn::new("example.com", "https://example.com", "Halo").unwrap();
+    let webauthn = IssuePasskey::new("example.com", "https://example.com", "Halo").unwrap();
     let start = webauthn
         .issue("00000000-0000-0000-0000-000000000001", "user", "Test user")
         .unwrap();
@@ -627,8 +630,8 @@ fn test_passkey_state_and_missing_data() {
 #[tokio::test]
 async fn test_captcha_service_flow() {
     let kv = MemSecrets::new();
-    let issuer = CaptchaIssuer::default();
-    let verifier = CaptchaVerifier::default();
+    let issuer = IssueCaptcha::default();
+    let verifier = VerifyCaptcha::default();
 
     // 1. 生成滑块挑战
     let challenge = issuer
@@ -693,33 +696,42 @@ async fn test_captcha_service_flow() {
         angle: None,
         points: None,
     };
-    let token = verifier
+    verifier
         .verify(&kv, &success_req)
         .await
         .expect("verify failed");
+    assert!(
+        !kv.data
+            .lock()
+            .unwrap()
+            .keys()
+            .any(|key| key.starts_with("cpt:"))
+    );
+    let token = issuer.token(&kv, 300).await.expect("token failed");
     assert!(token.starts_with("cpt_"));
 
     // 4. 登录时核验并消费 captcha_token
-    assert!(verifier.token(&kv, &token).await.unwrap());
+    assert!(verifier.take(&kv, &token).await.unwrap());
     // 第二次消费即失效
-    assert!(!verifier.token(&kv, &token).await.unwrap());
+    assert!(!verifier.take(&kv, &token).await.unwrap());
 }
 
 #[tokio::test]
 async fn test_magic_link_single_use() {
     let kv = MemSecrets::new();
-    let service = MagicLinkService::new(MagicLinkConfig {
+    let config = MagicLinkConfig {
         base_url: "https://auth.halo.local/magic".into(),
         signing_secret: "a-long-test-secret-for-magic-links".into(),
         ttl_seconds: 60,
-    });
-    let (token, _) = service
-        .create(&kv, "User@Example.com", None, "login", None)
+    };
+    let (token, _) = IssueMagic::create(config.clone(), &kv, "User@Example.com", None, "login")
         .await
         .unwrap();
-    let first = service.take(&kv, &token).await.unwrap();
+    let first = VerifyMagic::take(config.clone(), &kv, &token)
+        .await
+        .unwrap();
     assert_eq!(first.email, "user@example.com");
-    assert!(service.take(&kv, &token).await.is_err());
+    assert!(VerifyMagic::take(config, &kv, &token).await.is_err());
 }
 
 #[tokio::test]
@@ -751,33 +763,33 @@ async fn test_oidc_code_keeps_nonce_and_survives_failed_pkce() {
     let mut bad_scope = authorize.clone();
     bad_scope.scope = Some("admin".into());
     assert!(
-        oidc::OidcFlow::validate_authorize_request(&clients, &bad_scope)
+        oidc::Flow::validate_authorize_request(&clients, &bad_scope)
             .await
             .is_err()
     );
     let mut bad_redirect = authorize.clone();
     bad_redirect.redirect_uri = "https://evil.example/callback".into();
     assert!(
-        oidc::OidcFlow::validate_authorize_request(&clients, &bad_redirect)
+        oidc::Flow::validate_authorize_request(&clients, &bad_redirect)
             .await
             .is_err()
     );
     let mut bad_method = authorize.clone();
     bad_method.code_challenge_method = Some("S512".into());
     assert!(
-        oidc::OidcFlow::validate_authorize_request(&clients, &bad_method)
+        oidc::Flow::validate_authorize_request(&clients, &bad_method)
             .await
             .is_err()
     );
-    oidc::OidcFlow::validate_authorize_request(&clients, &authorize)
+    oidc::Flow::validate_authorize_request(&clients, &authorize)
         .await
         .unwrap();
     assert!(
-        oidc::OidcFlow::validate_authorize_request(&clients, &authorize)
+        oidc::Flow::validate_authorize_request(&clients, &authorize)
             .await
             .is_ok()
     );
-    let code = oidc::OidcFlow::issue_code_with_nonce(
+    let code = oidc::Flow::issue_code_with_nonce(
         &kv,
         "web",
         1,
@@ -803,19 +815,19 @@ async fn test_oidc_code_keeps_nonce_and_survives_failed_pkce() {
     let mut bad_redirect_token = bad.clone();
     bad_redirect_token.redirect_uri = Some("https://evil.example/callback".into());
     assert!(
-        oidc::OidcFlow::exchange_code(&clients, &kv, &bad_redirect_token)
+        oidc::Flow::exchange_code(&clients, &kv, &bad_redirect_token)
             .await
             .is_err()
     );
     let mut bad_client = bad.clone();
     bad_client.client_id = "other".into();
     assert!(
-        oidc::OidcFlow::exchange_code(&clients, &kv, &bad_client)
+        oidc::Flow::exchange_code(&clients, &kv, &bad_client)
             .await
             .is_err()
     );
     assert!(
-        oidc::OidcFlow::exchange_code(&clients, &kv, &bad)
+        oidc::Flow::exchange_code(&clients, &kv, &bad)
             .await
             .is_err()
     );
@@ -824,12 +836,12 @@ async fn test_oidc_code_keeps_nonce_and_survives_failed_pkce() {
         code_verifier: Some(verifier),
         ..bad
     };
-    let exchanged = oidc::OidcFlow::exchange_code(&clients, &kv, &good)
+    let exchanged = oidc::Flow::exchange_code(&clients, &kv, &good)
         .await
         .unwrap();
     assert_eq!(exchanged.nonce.as_deref(), Some("nonce-1"));
     assert!(
-        oidc::OidcFlow::exchange_code(&clients, &kv, &good)
+        oidc::Flow::exchange_code(&clients, &kv, &good)
             .await
             .is_err()
     );
@@ -850,7 +862,7 @@ async fn test_oidc_refresh_rotates_and_revokes_old_token() {
             is_public: true,
         },
     };
-    let service = token::TokenService::new("refresh-secret-32-bytes-long-enough", "halo", 60, 600);
+    let service = token::Token::new("refresh-secret-32-bytes-long-enough", "halo", 60, 600);
     let user = User {
         id: 7,
         username: "user".into(),
@@ -873,17 +885,13 @@ async fn test_oidc_refresh_rotates_and_revokes_old_token() {
     };
 
     let (_, next_refresh) =
-        oidc::OidcFlow::exchange_refresh_token(&clients, &users, &service, &kv, &request)
+        oidc::Flow::exchange_refresh_token(&clients, &users, &service, &kv, &request)
             .await
             .unwrap();
     assert_ne!(refresh, next_refresh);
+    assert!(oidc::Flow::is_token_revoked(&kv, &refresh).await.unwrap());
     assert!(
-        oidc::OidcFlow::is_token_revoked(&kv, &refresh)
-            .await
-            .unwrap()
-    );
-    assert!(
-        oidc::OidcFlow::exchange_refresh_token(&clients, &users, &service, &kv, &request)
+        oidc::Flow::exchange_refresh_token(&clients, &users, &service, &kv, &request)
             .await
             .is_err()
     );
@@ -897,7 +905,7 @@ async fn test_oidc_refresh_rotates_and_revokes_old_token() {
         ..request
     };
     assert!(matches!(
-        oidc::OidcFlow::exchange_refresh_token(
+        oidc::Flow::exchange_refresh_token(
             &clients,
             &inactive_users,
             &service,
@@ -1026,7 +1034,7 @@ fn test_totp_and_recovery_codes() {
 #[test]
 fn test_custom_claims_token_injection() {
     let service =
-        halo::token::TokenService::new("my-32-byte-secret-key-1234567890", "halo-idp", 3600, 86400);
+        halo::token::Token::new("my-32-byte-secret-key-1234567890", "halo-idp", 3600, 86400);
     let user = User {
         id: 20001,
         username: "developer".into(),
@@ -1059,18 +1067,24 @@ fn test_custom_claims_token_injection() {
 
 #[tokio::test]
 async fn test_passkey_fixture_register_request_verify() {
-    let webauthn = WebAuthn::new(
+    let issuer = IssuePasskey::new(
         "etools-dev.example.com",
         "https://etools-dev.example.com:8080",
         "Halo",
     )
     .unwrap();
-    let start = webauthn.issue("employee:42", "user", "User").unwrap();
+    let verifier = VerifyPasskey::new(
+        "etools-dev.example.com",
+        "https://etools-dev.example.com:8080",
+        "Halo",
+    )
+    .unwrap();
+    let start = issuer.issue("employee:42", "user", "User").unwrap();
     let mut state: serde_json::Value = serde_json::from_str(&start.state).unwrap();
     state["state"]["rs"]["challenge"] =
         serde_json::Value::String("FQky0FqnmV5KYqFU96E9aApSIRtjXiKcVFUf8Am8iDQ".into());
 
-    let registered = webauthn
+    let registered = verifier
         .register(
             include_str!("fixtures/passkey_register.json"),
             &state.to_string(),
@@ -1094,12 +1108,12 @@ async fn test_passkey_fixture_register_request_verify() {
         .unwrap()
         .unwrap();
 
-    let auth = webauthn.request(&[stored]).unwrap();
+    let auth = issuer.request(&[stored]).unwrap();
     let mut auth_state: serde_json::Value = serde_json::from_str(&auth.state).unwrap();
     auth_state["state"]["ast"]["challenge"] =
         serde_json::Value::String("vXR-a0od0rVjsq3WptR82x2pCToaG3j2V62p0vGZlr0".into());
 
-    let result = webauthn
+    let result = verifier
         .verify(
             include_str!("fixtures/passkey_auth.json"),
             &auth_state.to_string(),
@@ -1119,7 +1133,7 @@ async fn test_passkey_fixture_register_request_verify() {
     let mut replay_state = auth_state.clone();
     replay_state["state"]["ast"]["challenge"] = serde_json::Value::String("invalid".into());
     assert!(
-        webauthn
+        verifier
             .verify(
                 include_str!("fixtures/passkey_auth.json"),
                 &replay_state.to_string(),

@@ -6,10 +6,12 @@ use crate::factor::basic::password::{Account, Email as EmailPassword, Phone as P
 use crate::factor::enterprise::DeviceProof;
 use crate::store::{Devices, Events, Factors, Passkeys, Secrets, Users};
 use crate::types::User;
-use crate::validator::issuer::{CaptchaIssuer, CodeIssuer};
-use crate::validator::sender::{NotificationService, NotifyChannel};
-use crate::validator::verifier::WebAuthn;
-use crate::validator::verifier::captcha::{CaptchaType, CaptchaVerifier, CaptchaVerifyReq};
+use crate::validator::issuer::{Captcha as CaptchaIssue, Code, Passkey as PasskeyIssue};
+use crate::validator::sender::{Notify, NotifyChannel};
+use crate::validator::verifier::Passkey as PasskeyVerify;
+use crate::validator::verifier::captcha::{
+    Captcha as CaptchaVerify, CaptchaType, CaptchaVerifyReq,
+};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
@@ -158,10 +160,11 @@ pub struct Services<S, U, F, P, E, D> {
     pub passkeys: P,
     pub events: E,
     pub devices: D,
-    pub notify: NotificationService,
-    pub captcha_issuer: CaptchaIssuer,
-    pub captcha: CaptchaVerifier,
-    pub webauthn: Option<WebAuthn>,
+    pub notify: Notify,
+    pub captcha_issue: CaptchaIssue,
+    pub captcha_verify: CaptchaVerify,
+    pub passkey_issue: Option<PasskeyIssue>,
+    pub passkey_verify: Option<PasskeyVerify>,
     pub code_ttl: u64,
     pub code_digits: usize,
     table: Table,
@@ -175,7 +178,7 @@ impl<S, U, F, P, E, D> Services<S, U, F, P, E, D> {
         passkeys: P,
         events: E,
         devices: D,
-        notify: NotificationService,
+        notify: Notify,
     ) -> Self {
         Self {
             secrets,
@@ -185,27 +188,33 @@ impl<S, U, F, P, E, D> Services<S, U, F, P, E, D> {
             events,
             devices,
             notify,
-            captcha_issuer: CaptchaIssuer::default(),
-            captcha: CaptchaVerifier::default(),
-            webauthn: None,
+            captcha_issue: CaptchaIssue::default(),
+            captcha_verify: CaptchaVerify::default(),
+            passkey_issue: None,
+            passkey_verify: None,
             code_ttl: 300,
             code_digits: 6,
             table: Table::builtins(),
         }
     }
 
-    pub fn captcha(mut self, captcha: CaptchaVerifier) -> Self {
-        self.captcha = captcha;
+    pub fn captcha_verify(mut self, captcha: CaptchaVerify) -> Self {
+        self.captcha_verify = captcha;
         self
     }
 
-    pub fn captcha_issuer(mut self, issuer: CaptchaIssuer) -> Self {
-        self.captcha_issuer = issuer;
+    pub fn captcha_issue(mut self, issuer: CaptchaIssue) -> Self {
+        self.captcha_issue = issuer;
         self
     }
 
-    pub fn webauthn(mut self, webauthn: WebAuthn) -> Self {
-        self.webauthn = Some(webauthn);
+    pub fn passkey_issue(mut self, passkey: PasskeyIssue) -> Self {
+        self.passkey_issue = Some(passkey);
+        self
+    }
+
+    pub fn passkey_verify(mut self, passkey: PasskeyVerify) -> Self {
+        self.passkey_verify = Some(passkey);
         self
     }
 
@@ -231,7 +240,7 @@ where
             Kind::Check(_) | Kind::Issue(_) | Kind::Verify(_) | Kind::Effect(_) => {
                 self.table.get(&node.kind).is_some_and(|handler| {
                     !matches!(handler, Handler::Issue | Handler::Verify)
-                        || self.webauthn.is_some()
+                        || (self.passkey_issue.is_some() && self.passkey_verify.is_some())
                         || !matches!(
                             node.kind,
                             Kind::Issue(ref code) | Kind::Verify(ref code)

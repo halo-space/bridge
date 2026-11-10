@@ -19,6 +19,7 @@
 - [x] P2：接通可注册密码算法和显式通知通道。
 - [x] P2：移除 RSA `decrypt_or_raw` 的静默回退。
 - [x] P2：统一 bridge 公共命名、日志目标和 feature 边界。
+- [x] P1：收敛重复公共命名并按 issuer、verifier 拆分 Magic Link、Passkey 和 Captcha 职责。
 
 ## 已完成
 
@@ -80,7 +81,7 @@
 - [x] 继续保持 Discovery 与实际能力一致
 - [x] 明确是否实现隐式授权
 
-结论：bridge 只提供 OIDC 流程校验、Token 校验和外部 Provider 资料转换，不维护业务用户，因此不提供 UserInfo 端点；Introspection 由调用方使用 `TokenService::verify_live` 后组装响应；Discovery 只声明 Authorization Code、PKCE、JWKS 和撤销；隐式授权不实现，统一使用 Authorization Code + PKCE。
+结论：bridge 只提供 OIDC 流程校验、Token 校验和外部 Provider 资料转换，不维护业务用户，因此不提供 UserInfo 端点；Introspection 由调用方使用 `Token::verify_live` 后组装响应；Discovery 只声明 Authorization Code、PKCE、JWKS 和撤销；隐式授权不实现，统一使用 Authorization Code + PKCE。
 
 ## 阶段五：企业设备因子
 
@@ -146,7 +147,7 @@
 - [x] OIDC 授权码兑换检查自身 expires_at
 - [x] Passkey 注册使用 opaque subject，不要求业务 ID 为 UUID
 - [x] Passkey 状态只使用结构化 state，并在独立登录时输出 Identity
-- [x] TokenService 拒绝无效密钥、issuer 和 TTL
+- [x] Token 拒绝无效密钥、issuer 和 TTL
 
 ## 阶段十：调用方执行边界
 
@@ -158,6 +159,14 @@
 - [x] Provider 完善可替换的用户资料端点
 - [x] 明确社交和企业 Provider 通过调用方 Runner 接入 Pipeline
 - [x] Captcha 失败次数增加调用方可选的原子递增契约
+
+## 阶段十一：公共命名与职责边界收口
+
+- [x] issuer、verifier 和 OIDC 类型改为模块上下文下的简短命名
+- [x] Magic Link 拆分纯签名核心、issuer 签发和 verifier 消费
+- [x] Passkey 拆分 issuer 发起和 verifier 完成校验
+- [x] Captcha 拆分挑战签发、答案校验和通过凭证签发
+- [x] Token、RSA、通知门面和社交静态包装完成命名收口
 
 `Cards::schema()` 现在导出 JSON Schema、能力码和每个 Card 的参数 Schema。Pipeline 会拒绝重复节点、重复 route、空能力码、错误参数类型、未知参数、非法 Secret 引用和未限制的任意子图回边。`Effects` 提供跨进程幂等所需的原子 begin/complete/cancel 契约；bridge 不选择具体数据库或缓存。`retries` 由 Pipeline 记录每个节点实际交给 Runner 的次数并执行上限，`timeout` 由调用方的异步运行时负责中断，bridge 不绑定具体 runtime。
 

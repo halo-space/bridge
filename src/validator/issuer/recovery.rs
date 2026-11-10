@@ -1,9 +1,9 @@
 use crate::pkg::recovery::RecoveryCode;
 
 /// 恢复码签发。
-pub struct RecoveryIssuer;
+pub struct Recovery;
 
-impl RecoveryIssuer {
+impl Recovery {
     pub fn codes(count: usize) -> Vec<String> {
         RecoveryCode::generate_batch(count)
     }

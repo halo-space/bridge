@@ -9,16 +9,16 @@ use rsa::{
 use sha2::Sha256;
 use std::sync::OnceLock;
 
-pub struct RsaCrypto {
+pub struct Rsa {
     private_key: RsaPrivateKey,
     #[allow(dead_code)]
     public_key: RsaPublicKey,
     public_key_pem: String,
 }
 
-static GLOBAL_RSA: OnceLock<RsaCrypto> = OnceLock::new();
+static GLOBAL_RSA: OnceLock<Rsa> = OnceLock::new();
 
-impl RsaCrypto {
+impl Rsa {
     /// 初始化生成 2048 位 RSA 密钥对
     pub fn new() -> Result<Self> {
         let mut rng = OsRng;
@@ -118,9 +118,9 @@ mod tests {
 
     #[test]
     fn persists_and_restores_key_pair() {
-        let crypto = RsaCrypto::new().unwrap();
+        let crypto = Rsa::new().unwrap();
         let pem = crypto.private_key_pem().unwrap();
-        let restored = RsaCrypto::from_private_pem(&pem).unwrap();
+        let restored = Rsa::from_private_pem(&pem).unwrap();
         assert_eq!(crypto.public_pem(), restored.public_pem());
 
         let mut rng = OsRng;
@@ -130,9 +130,6 @@ mod tests {
             .unwrap();
         let encoded = BASE64_STANDARD.encode(cipher);
         assert_eq!(restored.decrypt_oaep(&encoded).unwrap(), "secret");
-        assert_ne!(
-            crypto.public_pem(),
-            RsaCrypto::rotate().unwrap().public_pem()
-        );
+        assert_ne!(crypto.public_pem(), Rsa::rotate().unwrap().public_pem());
     }
 }

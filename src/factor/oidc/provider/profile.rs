@@ -2,7 +2,7 @@ use crate::types::Identity;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OidcProfile {
+pub struct Profile {
     pub provider: String,
     pub subject: String,
     pub email: Option<String>,
@@ -10,7 +10,7 @@ pub struct OidcProfile {
     pub name: Option<String>,
 }
 
-impl OidcProfile {
+impl Profile {
     pub fn identity(&self) -> Identity {
         let mut identity = Identity::new(&self.provider, &self.subject);
         if let Some(email) = &self.email {

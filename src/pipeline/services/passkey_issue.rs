@@ -10,10 +10,10 @@ where
     D: Devices,
 {
     pub(super) async fn issue_passkey(&self, node: &Node, context: &Context) -> Result<Output> {
-        let webauthn = self
-            .webauthn
+        let passkey = self
+            .passkey_issue
             .as_ref()
-            .ok_or_else(|| Error::WebAuthnError("Pipeline WebAuthn service is missing".into()))?;
+            .ok_or_else(|| Error::WebAuthnError("Pipeline Passkey issuer is missing".into()))?;
         let data = node_data(context, node)?;
         if data.get("name").is_some() && data.get("display_name").is_some() {
             let subject = data
@@ -21,7 +21,7 @@ where
                 .or_else(|| data.get("user_id"))
                 .and_then(Value::as_str)
                 .ok_or_else(|| Error::AuthFailed("Missing field: subject".into()))?;
-            let start = webauthn.issue(
+            let start = passkey.issue(
                 subject,
                 string(data, "name")?.as_str(),
                 string(data, "display_name")?.as_str(),
@@ -39,7 +39,7 @@ where
             .subject
             .clone();
         let passkeys = self.passkeys.list(&subject).await?;
-        let start = webauthn.request(&passkeys)?;
+        let start = passkey.request(&passkeys)?;
         Ok(pass(json!({
             "mode": "request",
             "options": start.options,

@@ -5,17 +5,17 @@ use crate::validator::verifier::captcha::{
 };
 
 /// 人机验证码签发。
-pub struct CaptchaIssuer {
+pub struct Captcha {
     ttl_seconds: u64,
 }
 
-impl Default for CaptchaIssuer {
+impl Default for Captcha {
     fn default() -> Self {
         Self::new(120)
     }
 }
 
-impl CaptchaIssuer {
+impl Captcha {
     pub fn new(ttl_seconds: u64) -> Self {
         Self { ttl_seconds }
     }
@@ -88,5 +88,12 @@ impl CaptchaIssuer {
             }
         };
         Ok(challenge)
+    }
+
+    /// 签发校验成功后的短期通过凭证；校验逻辑由 verifier 独立完成。
+    pub async fn token<K: Secrets>(&self, kv: &K, ttl: u64) -> Result<String> {
+        let token = format!("cpt_{}", uuid::Uuid::new_v4().simple());
+        kv.set(&format!("cpt:{token}"), "1", ttl.max(1)).await?;
+        Ok(token)
     }
 }

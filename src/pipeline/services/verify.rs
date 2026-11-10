@@ -19,7 +19,11 @@ where
         if kind == "captcha" || kind.starts_with("captcha.") {
             let req: CaptchaVerifyReq = serde_json::from_value(data.clone())
                 .map_err(|e| Error::CaptchaFailed(e.to_string()))?;
-            let token = self.captcha.verify(&self.secrets, &req).await?;
+            self.captcha_verify.verify(&self.secrets, &req).await?;
+            let token = self
+                .captcha_issue
+                .token(&self.secrets, self.code_ttl)
+                .await?;
             return Ok(pass(json!({ "token": token })));
         }
         if kind == "sms" || kind == "code.sms" {

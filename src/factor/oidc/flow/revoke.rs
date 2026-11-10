@@ -1,6 +1,6 @@
 use super::*;
 
-impl OidcFlow {
+impl Flow {
     /// 撤销 Token (RFC 7009 Token Revocation)
     pub async fn revoke_token<K: Secrets>(kv: &K, token: &str, ttl_secs: u64) -> Result<()> {
         let key = format!("token:revoked:{}", token);

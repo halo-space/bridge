@@ -4,4 +4,4 @@ pub mod service;
 
 pub use claims::Claims;
 pub use jwks::{JwkKey, JwksResponse};
-pub use service::TokenService;
+pub use service::Token;

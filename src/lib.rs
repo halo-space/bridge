@@ -26,7 +26,7 @@ pub mod validator;
 
 pub use audit::{AuditEvent, AuditEventType, AuditOutcome};
 pub use error::{Error, Result};
-pub use factor::basic::magic::{MagicLinkConfig, MagicLinkPayload, MagicLinkService};
+pub use factor::basic::magic::{MagicLinkConfig, MagicLinkPayload};
 #[cfg(feature = "enterprise")]
 pub use factor::enterprise::{Device, DeviceProof};
 pub use factor::oidc::{Nonce, Pkce, State};
@@ -39,26 +39,26 @@ pub use pipeline::{
 };
 pub use pkg::password::{Algorithm, Argon2id, Bcrypt, Codec, Codecs, Password, Pbkdf2, Sm3};
 pub use pkg::recovery::RecoveryCode;
-pub use pkg::rsa::RsaCrypto;
+pub use pkg::rsa::Rsa;
 pub use pkg::totp::Totp;
 pub use risk::{RiskAssessment, RiskConfig, RiskDecision, RiskEngine, UserHistory};
 pub use rules::{Reauth, Rules};
 pub use store::Devices;
 pub use store::{Clients, Events, Factors, Limits, Passkeys, Secrets, Users};
 pub use types::{AuthCode, AuthResult, Identity, Level, Method, OAuthClient, TotpBinding, User};
-pub use validator::issuer::{CaptchaIssuer, CodeIssuer, RecoveryIssuer, Scene, TotpIssuer};
+pub use validator::issuer::Scene;
+#[cfg(feature = "passkey")]
+pub use validator::issuer::Start;
 #[cfg(feature = "sms")]
 pub use validator::sender::sms::{BoxFuture, Sender, SmsConfig, SmsSender};
 #[cfg(all(feature = "mail", feature = "sms"))]
-pub use validator::sender::{NotificationService, NotifyChannel};
+pub use validator::sender::{Notify, NotifyChannel};
 #[cfg(feature = "mail")]
 pub use validator::sender::{SmtpConfig, SmtpSender};
-pub use validator::verifier::Passcode;
-pub use validator::verifier::captcha::CaptchaVerifier;
-pub use validator::verifier::captcha::{CaptchaChallenge, CaptchaType, CaptchaVerifyReq};
-pub use validator::verifier::{Recovery as RecoveryVerifier, Totp as TotpVerifier};
 #[cfg(feature = "passkey")]
-pub use validator::verifier::{Start, WebAuthn};
+pub use validator::verifier::Auth;
+pub use validator::verifier::Passcode;
+pub use validator::verifier::captcha::{CaptchaChallenge, CaptchaType, CaptchaVerifyReq};
 
 /// 对外统一命名空间：`halo::bridge::*`。
 pub mod bridge {
@@ -78,23 +78,22 @@ pub mod bridge {
     pub use crate::Services;
     pub use crate::{
         Algorithm, Arg, Argon2id, AuditEvent, AuditEventType, AuditOutcome, Bcrypt,
-        CaptchaChallenge, CaptchaIssuer, CaptchaType, CaptchaVerifier, CaptchaVerifyReq, Card,
-        Cards, Claim, Clients, CodeIssuer, Codec, Codecs, Context, Devices, Edge, EdgeConfig,
-        Effect, Effects, Error, Event, Events, Factors, Fallback, Identity, Join, Kind, Limits,
-        Method, Node, NodeConfig, Nonce, OAuthClient, Op, Output, Passcode, Passkeys, Password,
-        Pbkdf2, Pipeline, PipelineConfig, Progress, Reauth, RecoveryCode, RecoveryIssuer,
-        RecoveryVerifier, Resolve, Result, RiskAssessment, RiskConfig, RiskDecision, RiskEngine,
-        Run, Runner, Scene, Secret, Secrets, Sm3, Totp, TotpIssuer, TotpVerifier, Users, secret,
+        CaptchaChallenge, CaptchaType, CaptchaVerifyReq, Card, Cards, Claim, Clients, Codec,
+        Codecs, Context, Devices, Edge, EdgeConfig, Effect, Effects, Error, Event, Events, Factors,
+        Fallback, Identity, Join, Kind, Limits, Method, Node, NodeConfig, Nonce, OAuthClient, Op,
+        Output, Passcode, Passkeys, Password, Pbkdf2, Pipeline, PipelineConfig, Progress, Reauth,
+        RecoveryCode, Resolve, Result, RiskAssessment, RiskConfig, RiskDecision, RiskEngine, Run,
+        Runner, Scene, Secret, Secrets, Sm3, Totp, Users, secret,
     };
+    #[cfg(feature = "passkey")]
+    pub use crate::{Auth, Start};
     pub use crate::{AuthCode, AuthResult, Level, Rules, TotpBinding, User};
     #[cfg(feature = "sms")]
     pub use crate::{BoxFuture, Sender, SmsConfig, SmsSender};
     #[cfg(feature = "enterprise")]
     pub use crate::{Device, DeviceProof};
     #[cfg(all(feature = "mail", feature = "sms"))]
-    pub use crate::{NotificationService, NotifyChannel};
+    pub use crate::{Notify, NotifyChannel};
     #[cfg(feature = "mail")]
     pub use crate::{SmtpConfig, SmtpSender};
-    #[cfg(feature = "passkey")]
-    pub use crate::{Start, WebAuthn};
 }

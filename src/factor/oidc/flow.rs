@@ -1,7 +1,7 @@
 use super::pkce::Pkce;
 use crate::error::{Error, Result};
 use crate::store::{Clients, Secrets, Users};
-use crate::token::TokenService;
+use crate::token::Token;
 use crate::types::{AuthCode, OAuthClient};
 use serde::{Deserialize, Serialize};
 
@@ -29,7 +29,7 @@ pub struct TokenRequest {
     pub refresh_token: Option<String>,
 }
 
-pub struct OidcFlow;
+pub struct Flow;
 
 mod authorize;
 mod code;

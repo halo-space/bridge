@@ -14,12 +14,12 @@ pub enum NotifyChannel {
 ///
 /// 将底层 SMTP 邮件和商业短信通道收敛为统一调度接口，业务方无需关心目标通道具体细节。
 #[derive(Clone)]
-pub struct NotificationService {
+pub struct Notify {
     mailer: Arc<SmtpSender>,
     sms: Arc<SmsSender>,
 }
 
-impl NotificationService {
+impl Notify {
     pub fn new(mailer: SmtpSender, sms: SmsSender) -> Self {
         Self {
             mailer: Arc::new(mailer),
@@ -71,7 +71,7 @@ mod tests {
     async fn test_notification_facade_routing() {
         let mailer = SmtpSender::new(SmtpConfig::default());
         let sms = SmsSender::new(SmsConfig::default());
-        let notify = NotificationService::new(mailer, sms);
+        let notify = Notify::new(mailer, sms);
 
         assert!(notify.is_active(NotifyChannel::Email) == notify.mailer().is_active());
         assert!(notify.is_active(NotifyChannel::Sms) == notify.sms().is_active());

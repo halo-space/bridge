@@ -63,6 +63,8 @@ src/
 
 Bridge 不保存业务用户，也不执行账号绑定。Provider 只把第三方已认证资料转换为统一的 `Identity`。
 
+公共类型按模块上下文命名：签发能力位于 `validator::issuer`，校验能力位于 `validator::verifier`；同名能力通过模块路径区分。OIDC 外部身份源使用 `factor::oidc::Provider` 和 `Profile`，Token、RSA 和通知门面分别使用 `token::Token`、`pkg::Rsa` 和 `sender::Notify`。
+
 ## 能力状态
 
 | 能力 | 状态 | 当前范围 |
@@ -131,7 +133,7 @@ Pipeline 的 `Services` 是 bridge 提供的可选默认适配器，不是能力
 
 认证材料统一经过创建、保存、过期、失败次数、单次消费和撤销处理。验证码发送由 `validator/sender` 负责，验证码生成和校验由 `validator/issuer` 与 `validator/verifier` 负责。
 
-Magic Link 的无存储签名接口只负责签名校验。需要单次消费时使用带 `Secrets` 的接口。
+Magic Link 的签发和校验分别使用 `validator::issuer::Magic` 与 `validator::verifier::Magic`；签发模块只生成和保存短期材料，校验模块只校验并消费，核心模型不访问 `Secrets`。
 
 ## OIDC
 

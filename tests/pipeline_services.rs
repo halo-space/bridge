@@ -1,6 +1,6 @@
 use halo::bridge::{
-    CaptchaType, CaptchaVerifyReq, Context, Device, Devices, Event, Factors, Node,
-    NotificationService, Passkeys, Pipeline, Progress, Secrets, Services, Users,
+    CaptchaType, CaptchaVerifyReq, Context, Device, Devices, Event, Factors, Node, Notify,
+    Passkeys, Pipeline, Progress, Secrets, Services, Users,
 };
 use halo::bridge::{Error, Events, TotpBinding, User};
 use halo::bridge::{SmsConfig, SmsSender, SmtpConfig, SmtpSender};
@@ -167,7 +167,7 @@ fn services(
     factors: FactorMem,
     events: EventMem,
 ) -> Services<Mem, UserMem, FactorMem, PasskeyMem, EventMem, DeviceMem> {
-    let notify = NotificationService::new(
+    let notify = Notify::new(
         SmtpSender::new(SmtpConfig::default()),
         SmsSender::new(SmsConfig::default()),
     );

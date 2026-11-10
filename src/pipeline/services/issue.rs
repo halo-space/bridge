@@ -28,7 +28,7 @@ where
         if kind == "captcha" || kind.starts_with("captcha.") {
             let captcha_type = captcha_type(kind)?;
             let challenge = self
-                .captcha_issuer
+                .captcha_issue
                 .issue(&self.secrets, captcha_type)
                 .await?;
             return Ok(pass(json!({ "challenge": challenge })));
@@ -49,8 +49,8 @@ where
             } else {
                 "login_sms"
             });
-        let key = CodeIssuer::key(scene, &target);
-        CodeIssuer::issue(&self.secrets, &key, self.code_ttl, self.code_digits).await?;
+        let key = Code::key(scene, &target);
+        Code::issue(&self.secrets, &key, self.code_ttl, self.code_digits).await?;
         Ok(pass(json!({
             "channel": channel,
             "target": target,
