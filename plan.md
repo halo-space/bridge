@@ -153,6 +153,7 @@
 - [x] 明确 `Effects` 由调用方提供跨进程原子实现
 - [x] 明确 `timeout` 由调用方 async runtime 负责中断
 - [x] Provider 增加 HTTP 业务错误响应 fixture
+- [x] Provider 增加本地 HTTP 成功链路 fixture
 - [x] Provider 统一 HTTP client、连接超时和请求超时
 - [x] Provider 完善可替换的用户资料端点
 - [x] Captcha 失败次数增加调用方可选的原子递增契约

@@ -91,6 +91,26 @@ async fn endpoint(body: &'static str) -> String {
     format!("http://{address}")
 }
 
+async fn sequence(bodies: Vec<&'static str>) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        for body in bodies {
+            if let Ok((mut stream, _)) = listener.accept().await {
+                let mut request = [0_u8; 2048];
+                let _ = stream.read(&mut request).await;
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(response.as_bytes()).await;
+            }
+        }
+    });
+    format!("http://{address}")
+}
+
 fn oauth_error<T>(result: halo::Result<T>, text: &str) {
     match result {
         Err(Error::OAuthError(message)) => assert!(message.contains(text), "{message}"),
@@ -164,4 +184,110 @@ async fn providers_surface_business_errors() {
     })
     .endpoint(endpoint(r#"{"code":"invalid","message":"invalid app"}"#).await);
     oauth_error(dingtalk.exchange_code_for_user("code").await, "invalid app");
+}
+
+#[tokio::test]
+async fn providers_complete_success_flows() {
+    let github_endpoint = sequence(vec![
+        r#"{"access_token":"gh-token"}"#,
+        r#"{"id":7,"login":"alice","name":"Alice","email":"alice@example.com"}"#,
+    ])
+    .await;
+    let github = GithubProvider::new(GithubConfig {
+        client_id: "id".into(),
+        client_secret: "secret".into(),
+        scope: None,
+    })
+    .endpoint(&github_endpoint)
+    .api_endpoint(&github_endpoint);
+    let profile = github
+        .exchange_code_for_profile("code", "https://app/callback")
+        .await
+        .unwrap();
+    assert_eq!(profile.provider, "github");
+    assert_eq!(profile.openid, "7");
+    assert_eq!(profile.email.as_deref(), Some("alice@example.com"));
+
+    let google_endpoint = sequence(vec![
+        r#"{"access_token":"google-token"}"#,
+        r#"{"sub":"google-1","email":"alice@example.com","name":"Alice"}"#,
+    ])
+    .await;
+    let google = GoogleProvider::new(GoogleConfig {
+        client_id: "id".into(),
+        client_secret: "secret".into(),
+        scope: None,
+    })
+    .endpoint(&google_endpoint)
+    .userinfo_endpoint(&google_endpoint);
+    let profile = google
+        .exchange_code_for_profile("code", "https://app/callback")
+        .await
+        .unwrap();
+    assert_eq!(profile.provider, "google");
+    assert_eq!(profile.openid, "google-1");
+
+    let wechat_endpoint = sequence(vec![
+        r#"{"access_token":"wechat-token","openid":"wx-1"}"#,
+        r#"{"openid":"wx-1","unionid":"union-1","nickname":"Alice"}"#,
+    ])
+    .await;
+    let wechat = WechatProvider::new(WechatConfig {
+        app_id: "id".into(),
+        app_secret: "secret".into(),
+        scope: None,
+    })
+    .endpoint(&wechat_endpoint);
+    let profile = wechat.exchange_code_for_profile("code").await.unwrap();
+    assert_eq!(profile.provider, "wechat");
+    assert_eq!(profile.openid, "wx-1");
+    assert_eq!(profile.unionid.as_deref(), Some("union-1"));
+
+    let feishu_endpoint = sequence(vec![
+        r#"{"app_access_token":"app-token"}"#,
+        r#"{"data":{"access_token":"user-token"}}"#,
+        r#"{"data":{"open_id":"fs-1","union_id":"union-1","name":"Alice"}}"#,
+    ])
+    .await;
+    let feishu = FeishuProvider::new(FeishuConfig {
+        app_id: "id".into(),
+        app_secret: "secret".into(),
+    })
+    .endpoint(&feishu_endpoint);
+    let profile = feishu
+        .exchange_code_for_profile("code", "https://app/callback")
+        .await
+        .unwrap();
+    assert_eq!(profile.provider, "feishu");
+    assert_eq!(profile.openid, "fs-1");
+
+    let wecom_endpoint = sequence(vec![
+        r#"{"access_token":"wecom-token"}"#,
+        r#"{"UserId":"wecom-1","name":"Alice"}"#,
+    ])
+    .await;
+    let wecom = WecomProvider::new(WecomConfig {
+        corp_id: "id".into(),
+        agent_id: "agent".into(),
+        corp_secret: "secret".into(),
+    })
+    .endpoint(&wecom_endpoint);
+    let value = wecom.exchange_code_for_user("code").await.unwrap();
+    assert_eq!(WecomProvider::identity(&value).unwrap().subject, "wecom-1");
+
+    let dingtalk_endpoint = sequence(vec![
+        r#"{"accessToken":"ding-token"}"#,
+        r#"{"unionId":"ding-1","nick":"Alice"}"#,
+    ])
+    .await;
+    let dingtalk = DingtalkProvider::new(DingtalkConfig {
+        client_id: "id".into(),
+        client_secret: "secret".into(),
+    })
+    .endpoint(&dingtalk_endpoint);
+    let value = dingtalk.exchange_code_for_user("code").await.unwrap();
+    assert_eq!(
+        DingtalkProvider::identity(&value).unwrap().subject,
+        "ding-1"
+    );
 }

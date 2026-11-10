@@ -148,7 +148,7 @@ Pipeline 内置 `Services` 已支持 `Effect("audit")` 自动调用 `Events::rec
 ## 文档和测试
 
 - README 已按当前目录和能力状态整理
-- Provider 网络失败测试已覆盖 GitHub、Google、微信、飞书、企业微信和钉钉；真实服务商业务错误响应仍由各 Provider 的错误字段解析负责。
+- Provider 已覆盖 GitHub、Google、微信、飞书、企业微信和钉钉的本地成功链路、网络失败和业务错误响应；真实服务商凭证和线上网络仍需调用方环境验收。
 - Pipeline 的主要成功和失败路径已覆盖；新增能力仍按实际接入继续补充场景测试。
 
 应用层调用方迁移不属于当前 bridge 范围。
