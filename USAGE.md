@@ -763,6 +763,16 @@ let sender = SmsSender::with(
 
 社交和企业 Provider 默认使用 15 秒连接与请求超时。GitHub 可以配置 `api_endpoint`，Google 可以配置 `userinfo_endpoint`；测试环境可以通过 `timeout` 和这些端点替换默认值。
 
+Provider 模块负责协议链路：生成授权地址、使用 code 换 token、读取第三方资料并转换成标准 Profile。它们不会自动注册到默认 `Services`，也不会自动绑定本地用户。要把微信、GitHub、Google、飞书、企业微信或钉钉放进 Pipeline，调用方需要实现一个 Runner：
+
+1. 从自己的配置读取 Provider 的 client ID、Secret 和 redirect URI。
+2. 在授权开始前生成并保存 state，OIDC/OAuth 场景按协议保存 PKCE verifier。
+3. 回调时调用 Provider 的 code 交换方法，并校验 state、redirect URI 和错误响应。
+4. 把 Provider 返回的 Profile 转成 `Identity`，或由调用方完成自己的账号绑定。
+5. 返回 `Output::Pass`，让 Pipeline 继续后续审计、TOTP 或应用结果节点。
+
+因此，“Provider 能换到第三方身份”和“业务登录流程允许这个身份源”是两个步骤；后者由调用方 Runner 和 PipelineConfig 决定。
+
 ## 8. Secret、Effects 和超时
 
 页面或 Pipeline JSON 中只保存 Secret 引用：

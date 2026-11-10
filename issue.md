@@ -69,6 +69,10 @@ Magic Link 只负责签名和有效期；`redirect_to` 的允许域名、路径�
 
 GitHub 增加 `api_endpoint()`，Google 增加 `userinfo_endpoint()`；测试环境和私有兼容服务可以替换 Token 之外的用户资料地址。
 
+### 已明确：社交和企业 Provider 的 Pipeline 边界
+
+Provider 已有授权地址、code 换 token、资料解析、Identity 转换和本地成功/失败 fixture；默认 `Services` 不直接持有第三方配置，也不自动维护本地账号绑定。调用方通过 Runner 接入 Provider，并自行完成 state/PKCE、Profile 到 Identity 的映射和业务登录策略。
+
 ## P0
 
 ### 设计边界：Pipeline 运行状态的短期输入
