@@ -32,7 +32,7 @@ pub struct SmsConfig {
     #[serde(default)]
     pub endpoint: Option<String>,
     #[serde(default = "default_timeout")]
-    pub timeout_secs: u64,
+    pub timeout: u64,
     #[serde(default)]
     pub retries: u32,
 }
@@ -57,7 +57,7 @@ impl Default for SmsConfig {
             sdk_app_id: String::new(),
             region: None,
             endpoint: None,
-            timeout_secs: default_timeout(),
+            timeout: default_timeout(),
             retries: 0,
         }
     }

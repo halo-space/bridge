@@ -176,7 +176,7 @@ impl Sender for Tencent {
 
 fn client(config: &SmsConfig) -> Client {
     Client::builder()
-        .timeout(Duration::from_secs(config.timeout_secs.max(1)))
+        .timeout(Duration::from_secs(config.timeout.max(1)))
         .build()
         .expect("positive SMS timeout must build an HTTP client")
 }

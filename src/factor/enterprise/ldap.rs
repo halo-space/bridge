@@ -13,7 +13,7 @@ pub struct LdapConfig {
     pub bind_password: Option<String>,
     pub user_search_filter: String,
     #[serde(default = "default_timeout")]
-    pub timeout_secs: u64,
+    pub timeout: u64,
 }
 
 fn default_timeout() -> u64 {
@@ -44,7 +44,7 @@ impl LdapAuth {
             ));
         }
 
-        let timeout = Duration::from_secs(config.timeout_secs.max(1));
+        let timeout = Duration::from_secs(config.timeout.max(1));
         let settings = LdapConnSettings::new().set_conn_timeout(timeout);
         let (conn, mut ldap) = LdapConnAsync::with_settings(settings, &config.server_url)
             .await
