@@ -887,6 +887,8 @@ Device 提供 RSA-SHA256 nonce 证明、启停、时间窗口和单次 nonce 消
 
 Passkey 提供 WebAuthn 注册、认证、计数器 CAS 和凭证状态更新。认证 state 的单次保存和消费由调用方通过 `Secrets` 完成。
 
+LDAP 配置支持 `timeout_secs`，默认 8 秒，用于限制连接和 LDAP 操作等待时间。
+
 `Identity.subject`、`Device.subject` 和 `Passkey.subject` 都是调用方定义的稳定 opaque 值。bridge 只比较它们是否一致，不解释其业务含义。
 
 ## 10. 错误处理

@@ -221,6 +221,7 @@ impl<S, U, F, P, E, D> Services<S, U, F, P, E, D> {
     pub fn code(mut self, ttl: u64, digits: usize) -> Self {
         self.code_ttl = ttl.max(1);
         self.code_digits = digits.clamp(4, 12);
+        self.captcha_verify = self.captcha_verify.ttl(self.code_ttl);
         self
     }
 }

@@ -5,6 +5,7 @@ use crate::store::Secrets;
 
 pub struct Captcha {
     max_attempts: u32,
+    passed_ttl_seconds: u64,
 }
 
 impl Default for Captcha {
@@ -17,7 +18,13 @@ impl Captcha {
     pub fn new(max_attempts: u32) -> Self {
         Self {
             max_attempts: max_attempts.max(1),
+            passed_ttl_seconds: 300,
         }
+    }
+
+    pub fn ttl(mut self, ttl: u64) -> Self {
+        self.passed_ttl_seconds = ttl.max(1);
+        self
     }
 
     pub async fn verify<K: Secrets>(&self, kv: &K, req: &CaptchaVerifyReq) -> Result<()> {
@@ -96,7 +103,12 @@ impl Captcha {
         }
         kv.del(&attempts_key).await?;
         kv.del(&type_key).await?;
-        kv.set(&format!("cap:passed:{}", req.id), "1", 300).await?;
+        kv.set(
+            &format!("cap:passed:{}", req.id),
+            "1",
+            self.passed_ttl_seconds,
+        )
+        .await?;
 
         Ok(())
     }

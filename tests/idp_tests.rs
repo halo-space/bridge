@@ -222,6 +222,7 @@ async fn test_social_and_enterprise_providers() {
         bind_dn: "cn=admin,dc=example,dc=com".into(),
         bind_password: Some("secret".into()),
         user_search_filter: "(&(objectClass=person)(uid={username}))".into(),
+        timeout_secs: 8,
     };
     let ldap_identity = factor::enterprise::LdapAuth::identity("alice");
     assert_eq!(ldap_identity.provider, "ldap");

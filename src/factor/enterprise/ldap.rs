@@ -1,7 +1,8 @@
 use crate::error::{Error, Result};
 use crate::types::Identity;
-use ldap3::{LdapConnAsync, Scope, SearchEntry, ldap_escape};
+use ldap3::{LdapConnAsync, LdapConnSettings, Scope, SearchEntry, ldap_escape};
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LdapConfig {
@@ -11,6 +12,12 @@ pub struct LdapConfig {
     #[serde(default, skip_serializing)]
     pub bind_password: Option<String>,
     pub user_search_filter: String,
+    #[serde(default = "default_timeout")]
+    pub timeout_secs: u64,
+}
+
+fn default_timeout() -> u64 {
+    8
 }
 
 pub struct LdapAuth;
@@ -37,10 +44,13 @@ impl LdapAuth {
             ));
         }
 
-        let (conn, mut ldap) = LdapConnAsync::new(&config.server_url)
+        let timeout = Duration::from_secs(config.timeout_secs.max(1));
+        let settings = LdapConnSettings::new().set_conn_timeout(timeout);
+        let (conn, mut ldap) = LdapConnAsync::with_settings(settings, &config.server_url)
             .await
             .map_err(|e| Error::LdapError(format!("connect failed: {e}")))?;
         ldap3::drive!(conn);
+        ldap.with_timeout(timeout);
 
         if !config.bind_dn.is_empty() {
             let bind_password = config.bind_password.as_deref().unwrap_or_default();
