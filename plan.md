@@ -19,7 +19,7 @@
 - [x] P1：拆分 OIDC Flow 和短信供应商实现。
 - [x] P1：让 Store 契约依赖中立模型。
 - [x] P2：接通可注册密码算法和显式通知通道。
-- [x] P2：移除 RSA `decrypt_or_raw` 的静默回退。
+- [x] P2：移除 RSA 全局密钥、`decrypt_or_raw` 和原始值回退。
 - [x] P2：统一 bridge 公共命名、日志目标和 feature 边界。
 - [x] P1：收敛重复公共命名并按 issuer、verifier 拆分 Magic Link、Passkey 和 Captcha 职责。
 
@@ -176,7 +176,7 @@
 
 `Cards::schema()` 现在导出 JSON Schema、能力码和每个 Card 的参数 Schema。Pipeline 会拒绝重复节点、重复 route、空能力码、错误参数类型、未知参数、非法 Secret 引用和未限制的任意子图回边。`Effects` 提供跨进程幂等所需的原子 begin/complete/cancel 契约；bridge 不选择具体数据库或缓存。`retries` 由 Pipeline 记录每个节点实际交给 Runner 的次数并执行上限，`timeout` 由调用方的异步运行时负责中断，bridge 不绑定具体 runtime。
 
-结论：`verify_token` 只做签名和 Claims 校验；需要实时状态的请求统一使用 `verify_live`。Refresh Token 换发通过 `Users` 检查用户存在和 `is_active`，业务命名空间、租户关系和用户数据由调用方管理。RSA 使用 `from_private_pem` 加载持久化密钥，`private_key_pem` 导出，`rotate` 显式轮换；全局生成只作为默认兼容入口。短信和邮件 sender 的 `strict` 模式用于生产失败闭环，关闭时保留开发 Mock 行为。Events 使用 `event.id` 幂等，并支持 trace/request 字段；写入失败由存储实现返回错误。
+结论：`verify_token` 只做签名和 Claims 校验；需要实时状态的请求统一使用 `verify_live`。Refresh Token 换发通过 `Users` 检查用户存在和 `is_active`，业务命名空间、租户关系和用户数据由调用方管理。RSA 必须由调用方显式创建或使用 `from_private_pem` 加载持久化密钥，`private_key_pem` 导出，`rotate` 显式轮换；不提供全局密钥或原始值回退。短信和邮件 sender 的 `strict` 模式用于生产失败闭环，关闭时保留开发 Mock 行为。Events 使用 `event.id` 幂等，并支持 trace/request 字段；写入失败由存储实现返回错误。
 
 ## 调用方负责业务范围
 

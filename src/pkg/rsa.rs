@@ -7,7 +7,6 @@ use rsa::{
     pkcs8::{DecodePrivateKey, EncodePrivateKey, EncodePublicKey, LineEnding},
 };
 use sha2::Sha256;
-use std::sync::OnceLock;
 
 pub struct Rsa {
     private_key: RsaPrivateKey,
@@ -15,8 +14,6 @@ pub struct Rsa {
     public_key: RsaPublicKey,
     public_key_pem: String,
 }
-
-static GLOBAL_RSA: OnceLock<Rsa> = OnceLock::new();
 
 impl Rsa {
     /// 初始化生成 2048 位 RSA 密钥对
@@ -64,12 +61,6 @@ impl Rsa {
         Self::new()
     }
 
-    /// 获取全局单例密钥对（进程生命周期内一致，避免重启前重复生成）
-    pub fn global() -> &'static Self {
-        GLOBAL_RSA
-            .get_or_init(|| Self::new().expect("Failed to initialize global RSA crypto key pair"))
-    }
-
     /// 获取内部 RSA 公钥引用
     pub fn public_key(&self) -> &RsaPublicKey {
         &self.public_key
@@ -94,21 +85,6 @@ impl Rsa {
 
         String::from_utf8(decrypted_bytes)
             .map_err(|e| Error::AuthFailed(format!("Decrypted bytes not valid UTF-8: {e}")))
-    }
-
-    /// 解密可能来自前端的 RSA 密文；短输入按原始值返回，疑似密文解密失败直接报错。
-    pub fn decrypt_or_raw(input: &str) -> Result<String> {
-        let trimmed = input.trim();
-        // RSA-2048 Base64 密文通常为 344 字符或以上。
-        if trimmed.len() >= 128 {
-            let plain = Self::global().decrypt_oaep(trimmed)?;
-            // 如果前端附带了时间戳防重放，例如 "plainPassword:::1730356800000"
-            if let Some((raw_pwd, _ts)) = plain.split_once(":::") {
-                return Ok(raw_pwd.to_string());
-            }
-            return Ok(plain);
-        }
-        Ok(input.to_string())
     }
 }
 

@@ -125,12 +125,9 @@ fn test_password_algorithms_and_unknown_code() {
 #[test]
 fn test_rsa_crypto_decrypt() {
     use halo::pkg::rsa::Rsa;
-    let pem = Rsa::global().public_pem();
+    let crypto = Rsa::new().unwrap();
+    let pem = crypto.public_pem();
     assert!(pem.contains("-----BEGIN PUBLIC KEY-----"));
-
-    // Test raw string fallback
-    let raw = "admin123";
-    assert_eq!(Rsa::decrypt_or_raw(raw).unwrap(), "admin123");
 }
 
 #[tokio::test]
