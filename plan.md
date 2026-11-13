@@ -49,21 +49,21 @@
 
 ## 阶段一：Passkey 完整闭环
 
-- [x] 增加真实 WebAuthn 注册 fixture
-- [x] 增加真实 WebAuthn 认证 fixture
+- [x] 增加真实 WebAuthn 注册样例
+- [x] 增加真实 WebAuthn 认证样例
 - [x] 验证重复 Credential ID 和计数器竞争
 - [x] 明确 `last_used_at`、backup 状态和重放处理
 
-验收条件是注册、认证、持久化读取和计数器更新都能通过真实协议数据测试。`Passkey` 保存注册时的用户验证和备份标记，`Auth` 返回认证时的最新标记、`needs_update` 和更新后的 native 数据。`Passkeys::update` 使用旧计数器 CAS 原子保存完整凭证状态。认证状态必须由调用方以单次凭证保存并消费，bridge 不管理 Session；错误 challenge 已有失败测试。
+验收条件是注册、认证、持久化读取和计数器更新都能通过真实协议数据测试。`Passkey` 保存注册时的用户验证和备份标记，`Auth` 返回认证时的最新标记、`needs_update` 和更新后的凭证数据。`Passkeys::update` 使用旧计数器做原子条件更新，保存完整凭证状态。认证状态必须由调用方以单次凭证保存并消费，bridge 不管理 Session；错误浏览器验证数据已有失败测试。
 
 ## 阶段二：SAML 完整闭环
 
-- [x] 增加真实 IdP metadata 和签名响应 fixture
+- [x] 增加真实身份源元数据和签名响应样例
 - [x] 增加断言重放测试
 - [x] 增加 SP 发起流程状态关联
-- [x] 明确 replay cache 的契约和失败策略
+- [x] 明确重复使用记录的接口和失败策略
 
-验收条件是签名、Issuer、Audience、时间窗口、状态关联和重放控制都有失败测试。`SamlAuth::start` 返回 tracker，`check_state` 强制关联 tracker 与 replay cache。
+验收条件是签名、签发方、接收方、时间窗口、状态关联和重复使用防护都有失败测试。`SamlAuth::start` 返回流程编号，`check_state` 强制关联流程编号和重复使用记录。
 
 ## 阶段三：Pipeline 编排
 
@@ -118,7 +118,7 @@
 - [x] 增加短信 `Sender` 适配器和 Tencent API 3.0 实现
 - [x] 增加 `Fallback` 组合自定义 Pipeline 节点
 - [x] 允许调用方覆盖与内置能力同名的节点实现
-- [x] 按 DAG payload 传递输入，避免分支字段混用
+- [x] 按当前流程分支传递输入，避免不同分支字段混用
 - [x] 增加 Device nonce 单次消费
 
 ## 阶段九：配置执行闭环
@@ -144,10 +144,10 @@
 - [x] 清理 Clippy 严格检查问题
 - [x] Run 序列化覆盖 request、meta 和副作用数据的敏感字段
 - [x] 内置 Services 显式声明支持的能力码
-- [x] Passkey 节点只读取当前 DAG payload，禁止跨分支扫描认证材料
+- [x] Passkey 节点只读取当前分支输入，禁止跨分支扫描认证信息
 - [x] 短信和邮件验证码 scene 沿 Pipeline payload 贯穿签发、发送和校验
 - [x] OIDC 授权码兑换检查自身 expires_at
-- [x] Passkey 注册使用 opaque subject，不要求业务 ID 为 UUID
+- [x] Passkey 注册使用调用方身份标识，不要求业务 ID 为 UUID
 - [x] Passkey 状态只使用结构化 state，并在独立登录时输出 Identity
 - [x] Token 拒绝无效密钥、issuer 和 TTL
 
@@ -155,8 +155,8 @@
 
 - [x] 明确 `Effects` 由调用方提供跨进程原子实现
 - [x] 明确 `timeout` 由调用方 async runtime 负责中断
-- [x] Provider 增加 HTTP 业务错误响应 fixture
-- [x] Provider 增加本地 HTTP 成功链路 fixture
+- [x] Provider 增加 HTTP 业务错误响应样例
+- [x] Provider 增加本地 HTTP 成功链路样例
 - [x] Provider 统一 HTTP client、连接超时和请求超时
 - [x] Provider 完善可替换的用户资料端点
 - [x] 明确社交和企业 Provider 通过调用方 Runner 接入 Pipeline

@@ -192,5 +192,5 @@ cargo test
 cargo bench --bench pipeline
 ```
 
-当前测试覆盖基础认证材料、密码算法、Passkey 注册认证 fixture、存储契约和计数器 CAS、OIDC 失败路径、Token rotation、Provider 资料转换以及 SAML 签名、状态关联和重放。
+当前测试覆盖基础认证信息、密码算法、Passkey 注册登录样例、存储接口和计数器并发更新、OIDC 失败路径、Token 刷新、Provider 资料转换以及 SAML 签名、状态关联和防重复使用。
 

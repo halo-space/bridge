@@ -106,7 +106,7 @@ pub trait Users {}    // 读取账号和密码凭证
 pub trait Clients {}  // 读取 OAuth/OIDC 客户端
 pub trait Secrets {}  // 短期验证码、state、nonce、单次凭证
 pub trait Factors {}  // TOTP 绑定
-pub trait Passkeys {} // Passkey 保存和计数器 CAS
+pub trait Passkeys {} // Passkey 保存和计数器条件更新
 pub trait Devices {}  // Device 保存、更新和撤销
 pub trait Events {}   // 审计事件写入
 pub trait Limits {}   // 发送和校验频控
@@ -119,7 +119,7 @@ pub trait Limits {}   // 发送和校验频控
 - Key 的租户、应用和平台命名空间。
 - TTL、原子消费和并发更新。
 - 用户是否存在、是否启用、是否被锁定。
-- Passkey 计数器 CAS 和 Device nonce 的单次消费。
+- Passkey 计数器条件更新和 Device 一次性编号的单次消费。
 
 验证码高并发失败计数可以在 `Secrets::incr` 中接入 Redis 原子递增；如果存储不支持，bridge 会使用兼容读写路径，但生产环境应提供原子实现。
 
@@ -584,7 +584,7 @@ Passkey 通常分成签发注册/认证选项和校验浏览器返回值：
 2. 通过 `issue(webauthn)` 获取浏览器选项和 state。
 3. 把 state 短期保存到 `Secrets`。
 4. 接收浏览器 Passkey 响应后提交给 `verify(passkey)`。
-5. 通过 `Passkeys::update` 做计数器 CAS。
+5. 通过 `Passkeys::update` 做计数器条件更新。
 
 因此，`issue(webauthn)` 的结果需要返回给浏览器，浏览器返回的 credential 再由调用方提交给 `input(credential)`；这两个请求之间的 state 由调用方短期保存。
 
@@ -884,7 +884,7 @@ Node::effect("audit", "audit")
 
 Device 提供 RSA-SHA256 nonce 证明、启停、时间窗口和单次 nonce 消费。调用方保存设备公钥和状态，并在 Store 中实现 `save`、`find`、`update` 和 `revoke`。
 
-Passkey 提供 WebAuthn 注册、认证、计数器 CAS 和凭证状态更新。认证 state 的单次保存和消费由调用方通过 `Secrets` 完成。
+Passkey 提供 WebAuthn 注册、认证、计数器条件更新和凭证状态更新。认证 state 的单次保存和消费由调用方通过 `Secrets` 完成。
 
 LDAP 配置支持 `timeout`，单位为秒，默认 8 秒，用于限制连接和 LDAP 操作等待时间。
 
