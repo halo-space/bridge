@@ -83,7 +83,6 @@ Pipeline 是登录流程。你可以把它理解为一串可连接的步骤，�
 - `Services` 是 bridge 提供的默认执行器。它把 `password`、`totp`、`sms`、`sms.send` 等能力连接到具体实现。
 - `Runner` 是一次节点执行器。调用方可以实现自己的 Runner，接入自己的用户系统、风控系统或通知服务。
 - `Fallback` 可以把两个 Runner 组合起来：先调用自定义 Runner，自定义 Runner 表示“不处理”时再使用默认 Services。
-- `Runner` 是执行器。调用方可以完全自己实现，也可以用 `Fallback` 在默认能力之外增加自定义能力。
 
 这三个东西不是同一份配置：
 
@@ -577,7 +576,7 @@ Passkey 通常分成签发注册/认证选项和校验浏览器返回值：
 4. 返回 `Done`
 ```
 
-`issue(webauthn)` 只生成浏览器需要的 options 和 state；它不是校验。`verify(passkey)` 才会验证签名、challenge、凭证 ID 和计数器，并把新的计数器交给 `Passkeys::update` 保存。两个步骤由不同的 Passkey 类型提供。
+`issue(webauthn)` 只生成浏览器需要的选项和 state；它不是校验。`verify(passkey)` 才会验证签名、浏览器返回的请求数据、凭证 ID 和计数器，并把新的计数器交给 `Passkeys::update` 保存。两个步骤由不同的 Passkey 类型提供。
 
 调用方负责：
 
@@ -889,7 +888,7 @@ Passkey 提供 WebAuthn 注册、认证、计数器 CAS 和凭证状态更新。
 
 LDAP 配置支持 `timeout`，单位为秒，默认 8 秒，用于限制连接和 LDAP 操作等待时间。
 
-`Identity.subject`、`Device.subject` 和 `Passkey.subject` 都是调用方定义的稳定 opaque 值。bridge 只比较它们是否一致，不解释其业务含义。
+`Identity.subject`、`Device.subject` 和 `Passkey.subject` 都是调用方定义的稳定身份标识。bridge 只比较它们是否一致，不解释它们在业务中的含义。
 
 ## 10. 错误处理
 
