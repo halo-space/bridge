@@ -59,11 +59,11 @@ Pipeline 是登录流程。你可以把它理解为一串可连接的步骤，�
 
 ### 3.2 生成、发送和检查
 
-- `issuer`：生成登录过程中临时使用的内容，例如验证码、Passkey 请求和一次性链接。
+- `issuer`：生成登录过程中临时使用的内容，例如验证码题目、Passkey 浏览器验证请求和一次性链接。
 - `sender`：把已经生成的验证码发送到短信或邮箱。
 - `verifier`：检查用户提交的验证码、TOTP、Passkey 或协议参数是否正确。
 
-同名能力通过模块路径区分，例如使用 `validator::issuer::Captcha` 生成挑战，使用 `validator::verifier::Captcha` 校验挑战；`issuer::Passkey` 负责发起浏览器流程，`verifier::Passkey` 负责完成校验。
+同名能力通过模块路径区分，例如使用 `validator::issuer::Captcha` 生成验证码题目，使用 `validator::verifier::Captcha` 检查用户答案；`issuer::Passkey` 负责发起浏览器流程，`verifier::Passkey` 负责完成校验。
 
 例如手机号登录通常拆成：
 

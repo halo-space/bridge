@@ -167,7 +167,7 @@
 - [x] issuer、verifier 和 OIDC 类型改为模块上下文下的简短命名
 - [x] Magic Link 拆分纯签名核心、issuer 签发和 verifier 消费
 - [x] Passkey 拆分 issuer 发起和 verifier 完成校验
-- [x] Captcha 拆分挑战签发、答案校验和通过凭证签发
+- [x] Captcha 拆分验证码题目生成、答案校验和通过凭证签发
 - [x] Captcha 通过凭证必须绑定 verifier 的一次性成功标记
 - [x] Captcha 具体类型拆分 issuer 生成和 verifier 校验
 - [x] Device 拆分模型、nonce 签发和证明校验
