@@ -999,7 +999,102 @@ LDAP 配置支持 `timeout`，单位为秒，默认 8 秒，用于限制连接�
 
 `Identity.subject`、`Device.subject` 和 `Passkey.subject` 都是调用方定义的稳定身份标识。bridge 只比较它们是否一致，不解释它们在业务中的含义。
 
-## 10. 错误处理
+## 10. 其他公共能力示例
+
+### 10.1 Token
+
+Token 只接收调用方传入的 `Identity`，不查询用户表，也不创建 Session：
+
+```rust
+use halo::bridge::{token::Token, Identity};
+
+let token = Token::new(
+    "replace-with-a-random-secret-at-least-32-bytes",
+    "halo-console",
+    900,
+    86_400,
+);
+let identity = Identity::new("password", "account-42");
+let (access, refresh) = token.issue_identity(&identity, None, Some("openid".into()))?;
+let claims = token.verify_token(&access)?;
+assert_eq!(claims.sub, "account-42");
+// refresh 交给调用方按自己的 Secrets 实现做轮换和撤销。
+let _ = refresh;
+```
+
+### 10.2 Magic Link
+
+签发、检查和单次消费由两个模块分别负责。下面示例只展示不涉及存储的签发和检查；生产环境使用 `verifier::Magic::take` 配合调用方的 `Secrets` 原子消费：
+
+```rust
+use halo::bridge::{MagicLinkConfig, validator};
+
+let config = MagicLinkConfig {
+    base_url: "https://login.example/magic".into(),
+    signing_secret: "replace-with-a-random-secret-at-least-32-bytes".into(),
+    ttl_seconds: 900,
+};
+let (token, url) = validator::issuer::Magic::issue(
+    config.clone(),
+    "alice@example.com",
+    Some("account-42"),
+    "login",
+)?;
+let payload = validator::verifier::Magic::verify(config, &token)?;
+assert_eq!(payload.email, "alice@example.com");
+println!("send this URL through the caller's mail sender: {url}");
+```
+
+### 10.3 Captcha
+
+验证码同样拆成签发和校验两个步骤。签发结果交给页面，校验成功后再签发短期通过凭证：
+
+```rust
+use halo::bridge::validator::{issuer::Captcha as Issue, verifier::captcha::{Captcha, CaptchaType, CaptchaVerifyReq}};
+
+let challenge = Issue::default().issue(&secrets, CaptchaType::Slider).await?;
+// 页面根据 challenge.slider 展示滑块，用户提交 offset_x 后进入下面的校验。
+Captcha::default().verify(&secrets, &CaptchaVerifyReq {
+    id: challenge.id.clone(),
+    captcha_type: CaptchaType::Slider,
+    text: None,
+    offset_x: Some(128),
+    angle: None,
+    points: None,
+}).await?;
+let pass = Issue::default().token(&secrets, &challenge.id, 300).await?;
+// 后续登录请求使用 verifier::captcha::Captcha::take 单次消费 pass。
+let _ = pass;
+```
+
+`secrets` 是调用方实现的 `Secrets`；bridge 不规定验证码 Key 的租户、应用或平台命名方式。
+
+### 10.4 邮件发送
+
+邮件通道和短信通道使用相同的替换方式：
+
+```rust
+use halo::bridge::validator::sender::mail::{Sender, SmtpConfig, SmtpSender};
+
+struct CompanyMail;
+impl Sender for CompanyMail {
+    fn send<'a>(&'a self, to: &'a str, subject: &'a str, html: &'a str, text: Option<&'a str>)
+        -> halo::bridge::validator::sender::mail::BoxFuture<'a>
+    {
+        Box::pin(async move {
+            // 在这里调用调用方自己的邮件 API 或消息队列。
+            println!("mail {to}: {subject} ({html}/{text:?})");
+            Ok(())
+        })
+    }
+}
+
+let mail = SmtpSender::with(SmtpConfig { enabled: true, ..SmtpConfig::default() }, CompanyMail);
+```
+
+这些示例和前面的账号密码、手机号验证码、TOTP、Passkey、风险分支、All/Any、Provider、Effects 示例共同覆盖主要公共入口；可运行组合示例位于 `examples/`，协议边界和失败场景位于 `tests/`。
+
+## 11. 错误处理
 
 认证请求不要把所有错误都转换成成功响应：
 
@@ -1026,7 +1121,7 @@ match pipeline.run(&mut run, &runner).await? {
 
 未知能力码、未知路由、错误参数、非法回边和超出执行限制都会返回错误或 `Deny`。调用方应将详细错误写入内部日志，对外只返回统一的登录失败提示。
 
-## 11. 运行示例
+## 12. 运行示例
 
 仓库中的示例可以直接查看完整节点组合：
 
@@ -1039,6 +1134,8 @@ cargo run --example pipeline_graph
 cargo run --example pipeline_runner
 # 运行自定义认证和 Fallback 示例。
 cargo run --example pipeline_custom
+# 运行 GitHub Provider 进入 Pipeline 的示例。
+cargo run --example provider_pipeline
 # 运行自定义短信供应商示例。
 cargo run --example sender_custom
 ```
@@ -1049,9 +1146,10 @@ cargo run --example sender_custom
 - `pipeline_graph`：风险分支、`Join::All` 和 `Join::Any`。
 - `pipeline_runner`：调用方自动执行节点的 Runner。
 - `pipeline_custom`：自定义用户名密码和 `Fallback`。
+- `provider_pipeline`：GitHub Provider、state 校验和 Identity 进入 Pipeline。
 - `sender_custom`：自定义短信供应商。
 
-## 12. 验证项目
+## 13. 验证项目
 
 ```bash
 # 检查 Rust 格式。
@@ -1076,7 +1174,7 @@ cargo bench --bench security
 
 `bridge` 不管理 HTTP 路由、Session、RBAC、业务用户、租户关系、组织目录和 OIDC UserInfo 端点；这些由应用层组合。
 
-## 13. 注册、取消和数据边界
+## 14. 注册、取消和数据边界
 
 `Cards::add`、`Cards::arg` 和 `Cards::version` 是公开的能力注册接口。应用启动时把内置能力和自己的 `custom.*` 能力加入 `Cards`，发布配置时调用 `compile_with`；未知能力、未知参数、类型不匹配或版本不一致都会被拒绝。`Cards` 只描述允许配置什么，不执行节点。
 
