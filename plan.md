@@ -130,6 +130,7 @@ bridge 不新增 RBAC、业务用户中心、Session 管理和租户字段。
 - [x] 增加真实协议样例和可控 Mock 服务测试。
 - [x] 增加密码、TOTP、Token、Pipeline、Provider 和 Sender 的 benchmark。
 - [x] 增加 CI、MSRV、clippy、rustdoc、依赖安全检查和 feature 矩阵。
+- [ ] 升级或替换当前 SAML、Passkey 依赖链中的 RSA 0.9、RSA 0.10 RC 和 `crypto-bigint` 安全公告；当前版本仍受上游版本约束，`cargo audit` 会明确失败，不能通过忽略公告掩盖。
 
 ## 每项完成时的验收
 
