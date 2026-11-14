@@ -2,7 +2,7 @@
 name = "halo-bridge"
 version = "0.4.8"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.91"
 description = "Halo Core Identity Provider, Multi-factor Authentication & OIDC Protocol Engine"
 license = "Apache-2.0"
 repository = "https://github.com/halo-space/bridge"
