@@ -23,6 +23,9 @@ pub enum Error {
     #[error("OAuth provider error: {0}")]
     OAuthError(String),
 
+    #[error("Temporary provider failure: {0}")]
+    Transient(String),
+
     #[error("LDAP error: {0}")]
     LdapError(String),
 

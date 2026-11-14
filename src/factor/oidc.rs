@@ -23,4 +23,4 @@ pub use server::{
     UserInfoResponse,
 };
 
-pub use provider::{OidcConfig, Profile, Provider};
+pub use provider::{Config, Discovery, Profile, Provider};

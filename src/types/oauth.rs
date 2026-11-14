@@ -1,3 +1,4 @@
+use super::Identity;
 use serde::{Deserialize, Serialize};
 
 /// OAuth2 / OIDC 客户端注册信息。
@@ -19,7 +20,7 @@ pub struct OAuthClient {
 pub struct AuthCode {
     pub code: String,
     pub client_id: String,
-    pub user_id: i64,
+    pub identity: Identity,
     pub redirect_uri: String,
     pub scope: String,
     pub code_challenge: Option<String>,

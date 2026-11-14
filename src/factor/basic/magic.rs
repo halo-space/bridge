@@ -51,8 +51,8 @@ pub struct MagicLinkPayload {
     pub jti: String,
     /// 目标用户邮箱
     pub email: String,
-    /// 用户 ID (若用户已存在)
-    pub user_id: Option<String>,
+    /// 调用方主体标识（若已知）
+    pub subject: Option<String>,
     /// 操作目的: "login" | "reset_password" | "bind_email" 等
     pub action: String,
     /// 最终跳转页面
@@ -67,7 +67,7 @@ pub struct MagicLinkPayload {
 pub(crate) fn issue(
     config: &MagicLinkConfig,
     email: &str,
-    user_id: Option<&str>,
+    subject: Option<&str>,
     action: &str,
     redirect_to: Option<&str>,
 ) -> Result<(String, String, MagicLinkPayload)> {
@@ -84,7 +84,7 @@ pub(crate) fn issue(
     let payload = MagicLinkPayload {
         jti: Uuid::new_v4().to_string(),
         email: email.trim().to_lowercase(),
-        user_id: user_id.map(str::to_string),
+        subject: subject.map(str::to_string),
         action: action.to_string(),
         redirect_to: redirect_to.map(str::to_string),
         iat: now,

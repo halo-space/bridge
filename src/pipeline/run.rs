@@ -23,6 +23,9 @@ pub struct Run {
     #[serde(default)]
     pub attempts: BTreeMap<String, u32>,
     pub steps: u32,
+    /// 调用方设置的短期运行状态过期时间（Unix 秒）。
+    #[serde(default)]
+    pub expires_at: Option<i64>,
     #[serde(default)]
     pub denied: Option<(String, String)>,
     /// 已经收到输入、等待内置执行器校验的节点。
@@ -40,6 +43,12 @@ pub struct Run {
 }
 
 impl Run {
+    /// 设置运行状态的过期时间。调用方应把这个时间同时写入短期存储 TTL。
+    pub fn expires_at(mut self, at: i64) -> Self {
+        self.expires_at = Some(at);
+        self
+    }
+
     /// 清理运行状态中的短期认证材料，便于调用方保存剩余流程。
     ///
     /// 调用方应先把当前节点需要返回给浏览器或用户的内容保存到自己的
@@ -83,6 +92,7 @@ struct RunWire<'a> {
     visits: &'a BTreeMap<String, u32>,
     attempts: &'a BTreeMap<String, u32>,
     steps: u32,
+    expires_at: &'a Option<i64>,
     denied: &'a Option<(String, String)>,
     submitted: &'a BTreeSet<String>,
     payloads: &'a BTreeMap<String, Value>,
@@ -118,6 +128,9 @@ impl Serialize for Run {
                 "Pipeline Run contains pending authentication material; execute or clear it before persistence",
             ));
         }
+        if let Err(error) = self.context.validate() {
+            return Err(S::Error::custom(error.to_string()));
+        }
         RunWire {
             run_id: &self.run_id,
             context: &self.context,
@@ -131,6 +144,7 @@ impl Serialize for Run {
             visits: &self.visits,
             attempts: &self.attempts,
             steps: self.steps,
+            expires_at: &self.expires_at,
             denied: &self.denied,
             submitted: &self.submitted,
             payloads: &self.payloads,

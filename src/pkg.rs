@@ -1,4 +1,4 @@
-#[cfg(any(feature = "social", feature = "enterprise"))]
+#[cfg(any(feature = "oidc", feature = "social", feature = "enterprise"))]
 pub mod http;
 pub mod password;
 pub mod recovery;

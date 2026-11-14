@@ -29,7 +29,7 @@ impl OidcDiscovery {
             response_types_supported: vec!["code".into()],
             subject_types_supported: vec!["public".into()],
             id_token_signing_alg_values_supported: vec!["HS256".into(), "RS256".into()],
-            scopes_supported: vec!["openid".into()],
+            scopes_supported: vec!["openid".into(), "profile".into(), "email".into()],
             token_endpoint_auth_methods_supported: vec!["client_secret_post".into(), "none".into()],
             claims_supported: vec![
                 "sub".into(),
@@ -38,6 +38,8 @@ impl OidcDiscovery {
                 "exp".into(),
                 "iat".into(),
                 "username".into(),
+                "name".into(),
+                "email".into(),
                 "nonce".into(),
             ],
             code_challenge_methods_supported: vec!["S256".into(), "plain".into()],

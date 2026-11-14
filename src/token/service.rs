@@ -1,7 +1,7 @@
 use super::claims::Claims;
 use crate::error::{Error, Result};
 use crate::store::Secrets;
-use crate::types::User;
+use crate::types::{Identity, User};
 use chrono::Utc;
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
 
@@ -12,6 +12,7 @@ pub struct Token {
     issuer: String,
     access_token_ttl: i64,
     refresh_token_ttl: i64,
+    key_id: Option<String>,
 }
 
 impl Token {
@@ -28,6 +29,7 @@ impl Token {
             issuer: issuer.into(),
             access_token_ttl,
             refresh_token_ttl,
+            key_id: None,
         }
     }
 
@@ -46,7 +48,22 @@ impl Token {
             issuer: issuer.into(),
             access_token_ttl,
             refresh_token_ttl,
+            key_id: None,
         }
+    }
+
+    /// 为 RS256 Token 设置与 JWKS 对应的密钥编号。
+    pub fn kid(mut self, value: impl Into<String>) -> Self {
+        self.key_id = Some(value.into());
+        self
+    }
+
+    pub fn access_ttl(&self) -> i64 {
+        self.access_token_ttl
+    }
+
+    pub fn refresh_ttl(&self) -> i64 {
+        self.refresh_token_ttl
     }
 
     /// 为认证通过的用户签发标准 Access Token 与 Refresh Token (自动匹配 HS256 或 RS256)
@@ -61,41 +78,97 @@ impl Token {
         audience: Option<String>,
         custom_claims: Option<serde_json::Map<String, serde_json::Value>>,
     ) -> Result<(String, String)> {
+        self.issue_identity_with_claims(&user.identity(), audience, None, custom_claims)
+    }
+
+    /// 为调用方提供的统一身份签发 Access Token 和 Refresh Token。
+    pub fn issue_identity(
+        &self,
+        identity: &Identity,
+        audience: Option<String>,
+        scope: Option<String>,
+    ) -> Result<(String, String)> {
+        self.issue_identity_with_claims(identity, audience, scope, None)
+    }
+
+    /// 只签发 Access Token，不创建 Refresh Token。
+    pub fn issue_access(
+        &self,
+        identity: &Identity,
+        audience: Option<String>,
+        scope: Option<String>,
+    ) -> Result<String> {
+        self.issue_identity(identity, audience, scope)
+            .map(|tokens| tokens.0)
+    }
+
+    /// 为统一身份签发带扩展 Claims 的 Access Token 和 Refresh Token。
+    pub fn issue_identity_with_claims(
+        &self,
+        identity: &Identity,
+        audience: Option<String>,
+        scope: Option<String>,
+        custom_claims: Option<serde_json::Map<String, serde_json::Value>>,
+    ) -> Result<(String, String)> {
+        self.issue_subject(
+            &identity.subject,
+            identity.name.as_deref().or(identity.email.as_deref()),
+            audience,
+            scope,
+            custom_claims,
+        )
+    }
+
+    fn issue_subject(
+        &self,
+        subject: &str,
+        username: Option<&str>,
+        audience: Option<String>,
+        scope: Option<String>,
+        custom_claims: Option<serde_json::Map<String, serde_json::Value>>,
+    ) -> Result<(String, String)> {
         self.validate_config()?;
+        if subject.trim().is_empty() {
+            return Err(Error::TokenError("Token subject cannot be empty".into()));
+        }
         let now = Utc::now().timestamp();
+        let username = username.unwrap_or(subject).to_string();
 
         // 1. Access Token（携带身份载荷和自定义扩展字段）
         let access_claims = Claims {
             kind: "access".into(),
-            sub: user.id.to_string(),
+            sub: subject.to_string(),
             iss: self.issuer.clone(),
             aud: audience.clone(),
             exp: now + self.access_token_ttl,
             iat: now,
             nbf: now,
             jti: uuid::Uuid::new_v4().to_string(),
-            username: user.username.clone(),
+            username: username.clone(),
+            scope: scope.clone(),
             custom: custom_claims.unwrap_or_default(),
         };
 
         // 2. Refresh Token
         let refresh_claims = Claims {
             kind: "refresh".into(),
-            sub: user.id.to_string(),
+            sub: subject.to_string(),
             iss: self.issuer.clone(),
             aud: audience,
             exp: now + self.refresh_token_ttl,
             iat: now,
             nbf: now,
             jti: uuid::Uuid::new_v4().to_string(),
-            username: user.username.clone(),
+            username,
+            scope,
             custom: serde_json::Map::new(),
         };
 
         let (access_token, refresh_token) = if let Some(ref priv_pem) = self.rsa_private_pem {
             let key = EncodingKey::from_rsa_pem(priv_pem.as_bytes())
                 .map_err(|e| Error::TokenError(format!("Invalid RSA private key: {e}")))?;
-            let header = Header::new(Algorithm::RS256);
+            let mut header = Header::new(Algorithm::RS256);
+            header.kid = self.key_id.clone();
 
             let at = encode(&header, &access_claims, &key)
                 .map_err(|e| Error::TokenError(e.to_string()))?;
@@ -139,7 +212,38 @@ impl Token {
         audience: String,
         nonce: Option<String>,
     ) -> Result<String> {
+        self.issue_id_identity(&user.identity(), audience, nonce, None)
+    }
+
+    /// 为调用方提供的统一身份签发 ID Token。
+    pub fn issue_id_identity(
+        &self,
+        identity: &Identity,
+        audience: String,
+        nonce: Option<String>,
+        scope: Option<String>,
+    ) -> Result<String> {
+        self.issue_id_subject(
+            &identity.subject,
+            identity.name.as_deref().or(identity.email.as_deref()),
+            audience,
+            nonce,
+            scope,
+        )
+    }
+
+    fn issue_id_subject(
+        &self,
+        subject: &str,
+        username: Option<&str>,
+        audience: String,
+        nonce: Option<String>,
+        scope: Option<String>,
+    ) -> Result<String> {
         self.validate_config()?;
+        if subject.trim().is_empty() {
+            return Err(Error::TokenError("Token subject cannot be empty".into()));
+        }
         let now = Utc::now().timestamp();
         let mut custom = serde_json::Map::new();
         if let Some(nonce) = nonce {
@@ -147,21 +251,23 @@ impl Token {
         }
         let claims = Claims {
             kind: "id".into(),
-            sub: user.id.to_string(),
+            sub: subject.to_string(),
             iss: self.issuer.clone(),
             aud: Some(audience),
             exp: now + self.access_token_ttl,
             iat: now,
             nbf: now,
             jti: uuid::Uuid::new_v4().to_string(),
-            username: user.username.clone(),
+            username: username.unwrap_or(subject).to_string(),
+            scope,
             custom,
         };
         if let Some(ref private) = self.rsa_private_pem {
             let key = EncodingKey::from_rsa_pem(private.as_bytes())
                 .map_err(|e| Error::TokenError(format!("Invalid RSA private key: {e}")))?;
-            encode(&Header::new(Algorithm::RS256), &claims, &key)
-                .map_err(|e| Error::TokenError(e.to_string()))
+            let mut header = Header::new(Algorithm::RS256);
+            header.kid = self.key_id.clone();
+            encode(&header, &claims, &key).map_err(|e| Error::TokenError(e.to_string()))
         } else {
             encode(
                 &Header::default(),
@@ -186,6 +292,22 @@ impl Token {
         Ok(claims)
     }
 
+    /// 根据已经验证的 Claims 重新签发 ID Token。
+    pub fn issue_id_claims(&self, claims: &Claims, audience: String) -> Result<String> {
+        let nonce = claims
+            .custom
+            .get("nonce")
+            .and_then(|value| value.as_str())
+            .map(str::to_string);
+        self.issue_id_subject(
+            &claims.sub,
+            Some(&claims.username),
+            audience,
+            nonce,
+            claims.scope.clone(),
+        )
+    }
+
     pub async fn verify_live<K: Secrets>(&self, kv: &K, token: &str) -> Result<Claims> {
         let claims = self.verify_token(token)?;
         if kv.get(&crate::token::revoke_key(token)).await?.is_some() {
@@ -196,19 +318,21 @@ impl Token {
 
     pub fn renew(&self, token: &str) -> Result<(String, String)> {
         let claims = self.verify_refresh(token)?;
-        let user = User {
-            id: claims
-                .sub
-                .parse()
-                .map_err(|_| Error::TokenError("Invalid subject".into()))?,
-            username: claims.username,
-            email: None,
-            phone: None,
-            password_hash: None,
-            password_algorithm: None,
-            is_active: true,
-        };
-        self.issue_tokens(&user, claims.aud)
+        self.renew_claims(&claims)
+    }
+
+    /// 根据已经验证的 Refresh Token Claims 重新签发 Token。
+    pub fn renew_claims(&self, claims: &Claims) -> Result<(String, String)> {
+        if claims.kind != "refresh" {
+            return Err(Error::TokenError("Expected refresh claims".into()));
+        }
+        self.issue_subject(
+            &claims.sub,
+            Some(&claims.username),
+            claims.aud.clone(),
+            claims.scope.clone(),
+            None,
+        )
     }
 
     fn verify(&self, token: &str) -> Result<Claims> {

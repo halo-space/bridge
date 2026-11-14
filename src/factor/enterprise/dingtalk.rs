@@ -67,16 +67,17 @@ impl Dingtalk {
             "grantType": "authorization_code"
         });
 
-        let resp = http.post(token_url).json(&body).send().await.map_err(|e| {
-            Error::OAuthError(format!("Dingtalk token exchange network error: {e}"))
-        })?;
+        let resp =
+            http.post(token_url).json(&body).send().await.map_err(|e| {
+                crate::pkg::http::provider(e, "Dingtalk token exchange network error")
+            })?;
 
-        let token_json: serde_json::Value = resp
-            .error_for_status()
-            .map_err(|e| Error::OAuthError(format!("Dingtalk token HTTP error: {e}")))?
-            .json()
-            .await
-            .map_err(|e| Error::OAuthError(format!("Invalid Dingtalk token JSON: {e}")))?;
+        let token_json: serde_json::Value = crate::pkg::http::json(
+            resp.error_for_status()
+                .map_err(|e| crate::pkg::http::provider(e, "Dingtalk token HTTP error"))?,
+            "Dingtalk token",
+        )
+        .await?;
 
         let access_token = token_json["accessToken"].as_str().ok_or_else(|| {
             let msg = token_json["message"]
@@ -92,14 +93,15 @@ impl Dingtalk {
             .header("x-acs-dingtalk-access-token", access_token)
             .send()
             .await
-            .map_err(|e| Error::OAuthError(format!("Dingtalk user fetch network error: {e}")))?;
+            .map_err(|e| crate::pkg::http::provider(e, "Dingtalk user fetch network error"))?;
 
-        let user_json: serde_json::Value = user_resp
-            .error_for_status()
-            .map_err(|e| Error::OAuthError(format!("Dingtalk user HTTP error: {e}")))?
-            .json()
-            .await
-            .map_err(|e| Error::OAuthError(format!("Invalid Dingtalk user JSON: {e}")))?;
+        let user_json: serde_json::Value = crate::pkg::http::json(
+            user_resp
+                .error_for_status()
+                .map_err(|e| crate::pkg::http::provider(e, "Dingtalk user HTTP error"))?,
+            "Dingtalk user",
+        )
+        .await?;
 
         Ok(user_json)
     }

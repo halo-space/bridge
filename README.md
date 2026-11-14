@@ -9,7 +9,7 @@ Bridge 是一个面向企业登录认证的 Rust 能力库。它提供密码、�
 halo = { package = "halo-bridge", version = "0.4" }
 ```
 
-默认启用 `full` feature。只需要核心 Pipeline、类型和算法时，可以使用 `default-features = false`；邮件、短信、社交、企业和 Passkey 能力分别由 `mail`、`sms`、`social`、`enterprise`、`passkey` feature 控制。
+默认启用 `full` feature。只需要核心 Pipeline、类型和算法时，可以使用 `default-features = false`；邮件、短信、社交、企业、Passkey 和外部 OIDC Provider 能力分别由 `mail`、`sms`、`social`、`enterprise`、`passkey`、`oidc` feature 控制。
 
 ```rust
 use halo::bridge::{Context, Node, Pipeline};
@@ -78,11 +78,11 @@ Bridge 不保存业务用户，也不执行账号绑定。Provider 只把第三�
 | LDAP | 已实现 | 服务账号绑定、用户搜索、密码绑定、Identity 输出 |
 | SAML | 已实现 | 企业单点登录、签名检查、时间检查和防重复使用；校验时需要调用方提供原子重放缓存 |
 | 企业微信、钉钉 | 已实现 | 授权码交换和 Identity 输出 |
-| OIDC Authorization Code | 已实现 | OAuth/OIDC 授权码、PKCE、state、nonce、刷新和撤销 |
+| OIDC Authorization Code | 已实现 | 授权码、PKCE、state、nonce、客户端校验、统一 Identity、TokenResponse、ID Token、Refresh Token 轮换和撤销校验 |
 | UserInfo、Introspection、隐式授权 | 边界已确定 | Bridge 不维护业务用户；应用层可以用 Token 校验结果自行返回用户信息；只支持授权码 + PKCE |
 | Passkey / WebAuthn | 已实现 | 注册、登录、设备状态和计数器更新；凭证由调用方保存 |
 | Device | 已实现 | RSA-SHA256 nonce 证明、启停、时间窗口和 `Devices` 存储契约 |
-| Pipeline | 已实现 | 支持输入、检查、签发、发送、校验、审计、内置 `Services` 执行绑定、路由分支、All/Any 汇聚、有限循环、上下文传递、重试、拒绝和暂停继续 |
+| Pipeline | 已实现 | 支持输入、检查、风险评分、签发、发送、校验、审计、内置 `Services` 执行绑定、路由分支、All/Any 汇聚、有限循环、上下文传递、重试、拒绝和暂停继续 |
 | 风险决策和审计模型 | 已实现 | 由调用方负责持久化和策略接入 |
 
 ## 类型和存储
@@ -109,12 +109,14 @@ pub trait Factors { /* TOTP 绑定读取 */ }
 pub trait Passkeys { /* Passkey 保存、查询和计数器更新 */ }
 pub trait Devices { /* 设备保存、查询、更新和撤销 */ }
 pub trait Events { /* 审计事件写入 */ }
-pub trait Limits { /* 发送和验证频控 */ }
+pub trait Limits { /* 发送、验证频控和失败锁定 */ }
 ```
 
 `Passkeys::update` 会带上旧计数器，只有旧值匹配时才允许更新，用来防止同一个 Passkey 被并发重复使用。`Secrets::take_if` 用于“检查内容并立即删除”，这两个动作必须在存储中一次完成，不能拆成两个并发不安全的操作。
 
 Pipeline 的 `Services` 是 bridge 提供的可选默认适配器，不是能力边界。调用方可以完全替换用户名密码、验证码、TOTP、Passkey、社交和企业认证的实现；`Fallback` 会优先使用调用方处理器，再回退到默认适配器。
+
+`Services::new(...)` 默认使用不限制的 `Noop`。需要频控时，调用方通过 `.limits(store)` 注入自己的 `Limits` 实现；节点 `args` 中同时配置 `limit` 和 `window` 后才会启用限制，例如 `{"limit": 5, "window": 60, "lock": 900}`。短信、邮件、验证码、密码和 TOTP 节点会先调用 `allow`，校验成功调用 `clear`，失败调用 `fail`。key、计数、锁定时间和租户/应用命名空间都由调用方存储实现负责。
 
 页面配置使用固定能力码；自定义能力使用 `custom.*` 命名空间，例如 `custom.card`，并且必须先注册后才能被页面引用。
 
@@ -161,10 +163,10 @@ OIDC 相关代码位于 `factor/oidc`：
 - `flow.rs` 负责第三方登录授权码、回调地址、刷新 Token 等流程检查
 - `state`、`nonce` 和 PKCE 用来防止伪造回调和重复提交
 - `server.rs` 提供协议发现、撤销和响应数据结构
-- `provider/` 把外部身份源返回的信息转换成统一的 `Identity`
+- `provider/` 构造第三方授权地址，读取 Discovery/JWKS，校验 ID Token，并把外部身份源返回的信息转换成统一的 `Identity`
 - 用户、客户端和业务数据由调用方提供，Bridge 不创建业务用户
 
-Discovery 只声明当前已经实现的 Authorization Code、PKCE、JWKS 和撤销能力。
+服务端 `Discovery` 只声明当前实现的 Authorization Code、PKCE、JWKS 和撤销能力。外部 Provider 使用 `factor::oidc::Config` 和 `factor::oidc::Provider`；调用方保存 state、nonce、PKCE verifier，并在回调时把验证后的 `Identity` 交给自己的账号绑定或登录流程。
 
 ## Pipeline 示例
 
@@ -190,7 +192,10 @@ cargo run --example sender_custom
 cargo check
 cargo test
 cargo bench --bench pipeline
+cargo bench --bench security
 ```
 
-当前测试覆盖基础认证信息、密码算法、Passkey 注册登录样例、存储接口和计数器并发更新、OIDC 失败路径、Token 刷新、Provider 资料转换以及 SAML 签名、状态关联和防重复使用。
+当前测试覆盖基础认证信息、密码算法、Passkey 注册登录样例、存储接口和计数器并发更新、服务端 OIDC 授权码与 Token 刷新、外部 OIDC Discovery/JWKS/ID Token 校验、Provider 资料转换以及 SAML 签名、状态关联和防重复使用。
 
+
+`Cards` 是公开的能力注册表，`Services` 是固定内置能力的默认 Runner。调用方可以实现自己的 `Runner`，使用 `Fallback` 单独替换或增加能力；每次登录只加载已发布的 Pipeline，不会动态改写进程内能力表。`Pipeline::execute_until` 接受调用方的 deadline 和取消信号，外层 future 的实际中断由调用方运行时负责。运行上下文、可恢复状态和 Provider JSON 响应都有大小边界，敏感材料可使用 `Sensitive<T>` 标记；风险、频控、锁定和重认证规则由调用方提供，bridge 只执行节点并传递结果。

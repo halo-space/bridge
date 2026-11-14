@@ -1,6 +1,6 @@
 use super::*;
 
-impl<S, U, F, P, E, D> Services<S, U, F, P, E, D>
+impl<S, U, F, P, E, D, L> Services<S, U, F, P, E, D, L>
 where
     S: Secrets,
     U: Users,
@@ -8,9 +8,11 @@ where
     P: Passkeys,
     E: Events,
     D: Devices,
+    L: Limits,
 {
     pub(super) async fn send(&self, node: &Node, context: &Context, kind: &str) -> Result<Output> {
         let data = node_data(context, node)?;
+        self.allow(node, context, data).await?;
         let channel = if kind.contains("email") {
             NotifyChannel::Email
         } else if kind.contains("sms") {

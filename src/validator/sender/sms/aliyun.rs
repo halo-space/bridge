@@ -74,9 +74,10 @@ impl Sender for Aliyun {
                 .await
                 .map_err(|e| Error::SmsFailed(format!("Aliyun SMS request failed: {e}")))?;
             let status = response.status();
-            let body: Value = response
-                .json()
+            let bytes = crate::pkg::http::body(response, "Aliyun SMS")
                 .await
+                .map_err(|e| Error::SmsFailed(e.to_string()))?;
+            let body: Value = serde_json::from_slice(&bytes)
                 .map_err(|e| Error::SmsFailed(format!("Invalid SMS response: {e}")))?;
             if status.is_success() && body.get("Code").and_then(Value::as_str) == Some("OK") {
                 Ok(())

@@ -35,7 +35,7 @@ pub use pipeline::Services;
 pub use pipeline::{
     Arg, Card, Cards, Claim, Context, Edge, EdgeConfig, Effect, Effects, Event, Fallback, Join,
     Kind, Node, NodeConfig, Op, Output, Pipeline, PipelineConfig, Progress, Resolve, Run, Runner,
-    Secret, secret,
+    Secret, Sensitive, secret,
 };
 pub use pkg::password::{Algorithm, Argon2id, Bcrypt, Codec, Codecs, Password, Pbkdf2, Sm3};
 pub use pkg::recovery::RecoveryCode;
@@ -44,7 +44,7 @@ pub use pkg::totp::Totp;
 pub use risk::{RiskAssessment, RiskConfig, RiskDecision, RiskEngine, UserHistory};
 pub use rules::{Reauth, Rules};
 pub use store::Devices;
-pub use store::{Clients, Events, Factors, Limits, Passkeys, Secrets, Users};
+pub use store::{Clients, Decision, Events, Factors, Limits, Noop, Passkeys, Rule, Secrets, Users};
 pub use types::{AuthCode, AuthResult, Identity, Level, Method, OAuthClient, TotpBinding, User};
 pub use validator::issuer::Scene;
 #[cfg(feature = "passkey")]
@@ -79,11 +79,12 @@ pub mod bridge {
     pub use crate::{
         Algorithm, Arg, Argon2id, AuditEvent, AuditEventType, AuditOutcome, Bcrypt,
         CaptchaChallenge, CaptchaType, CaptchaVerifyReq, Card, Cards, Claim, Clients, Codec,
-        Codecs, Context, Devices, Edge, EdgeConfig, Effect, Effects, Error, Event, Events, Factors,
-        Fallback, Identity, Join, Kind, Limits, Method, Node, NodeConfig, Nonce, OAuthClient, Op,
-        Output, Passcode, Passkeys, Password, Pbkdf2, Pipeline, PipelineConfig, Progress, Reauth,
-        RecoveryCode, Resolve, Result, RiskAssessment, RiskConfig, RiskDecision, RiskEngine, Run,
-        Runner, Scene, Secret, Secrets, Sm3, Totp, Users, secret,
+        Codecs, Context, Decision, Devices, Edge, EdgeConfig, Effect, Effects, Error, Event,
+        Events, Factors, Fallback, Identity, Join, Kind, Limits, Method, Node, NodeConfig, Nonce,
+        Noop, OAuthClient, Op, Output, Passcode, Passkeys, Password, Pbkdf2, Pipeline,
+        PipelineConfig, Progress, Reauth, RecoveryCode, Resolve, Result, RiskAssessment,
+        RiskConfig, RiskDecision, RiskEngine, Rule, Run, Runner, Scene, Secret, Secrets, Sensitive,
+        Sm3, Totp, Users, secret,
     };
     #[cfg(feature = "passkey")]
     pub use crate::{Auth, Start};

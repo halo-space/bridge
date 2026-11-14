@@ -107,9 +107,10 @@ impl Tencent {
             .await
             .map_err(|e| Error::SmsFailed(format!("Tencent SMS request failed: {e}")))?;
         let status = response.status();
-        let body: Value = response
-            .json()
+        let bytes = crate::pkg::http::body(response, "Tencent SMS")
             .await
+            .map_err(|e| Error::SmsFailed(e.to_string()))?;
+        let body: Value = serde_json::from_slice(&bytes)
             .map_err(|e| Error::SmsFailed(format!("Invalid Tencent SMS response: {e}")))?;
         if !status.is_success() {
             return Err(Error::SmsFailed(format!(

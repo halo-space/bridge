@@ -4,6 +4,32 @@ use crate::types::Identity;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+/// 明确标记不应进入日志、审计或可恢复运行状态的值。
+/// JSON 上下文仍会保留字段名清理作为最后一道防线；调用方在有类型边界的
+/// API 中应优先使用此类型，并只在真正需要的位置调用 `expose`。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Sensitive<T>(pub T);
+
+impl<T> Sensitive<T> {
+    pub fn new(value: T) -> Self {
+        Self(value)
+    }
+
+    pub fn expose(&self) -> &T {
+        &self.0
+    }
+
+    pub fn into_inner(self) -> T {
+        self.0
+    }
+}
+
+pub(crate) const MAX_VALUE_BYTES: usize = 64 * 1024;
+const MAX_VALUE_DEPTH: usize = 16;
+const MAX_OBJECT_FIELDS: usize = 256;
+const MAX_ARRAY_ITEMS: usize = 1024;
+const MAX_STRING_BYTES: usize = 8 * 1024;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Kind {
     Input,
@@ -156,6 +182,27 @@ pub struct Context {
 }
 
 impl Context {
+    /// 校验跨请求上下文的大小，避免把任意大对象带入 Run 或 Runner。
+    pub fn validate(&self) -> Result<()> {
+        if serde_json::to_vec(self)
+            .map(|bytes| bytes.len() > MAX_VALUE_BYTES)
+            .unwrap_or(true)
+        {
+            return Err(Error::AuthFailed("Pipeline context is too large".into()));
+        }
+        check_value(&self.request, 0)?;
+        for value in self.meta.values() {
+            check_value(value, 0)?;
+        }
+        for value in self.data.values() {
+            check_value(value, 0)?;
+        }
+        for item in &self.evidence {
+            check_value(&item.data, 0)?;
+        }
+        Ok(())
+    }
+
     /// 为当前节点创建执行视图。
     ///
     /// Run 内部会保留完整流程状态，但 Runner 只应看到当前节点继承到的
@@ -180,6 +227,48 @@ impl Context {
             data: current,
             evidence: evidence.to_vec(),
         }
+    }
+}
+
+pub(crate) fn check_value(value: &Value, depth: usize) -> Result<()> {
+    if depth > MAX_VALUE_DEPTH {
+        return Err(Error::AuthFailed(
+            "Pipeline value is too deeply nested".into(),
+        ));
+    }
+    if serde_json::to_vec(value)
+        .map(|bytes| bytes.len() > MAX_VALUE_BYTES)
+        .unwrap_or(true)
+    {
+        return Err(Error::AuthFailed("Pipeline value is too large".into()));
+    }
+    match value {
+        Value::String(text) if text.len() > MAX_STRING_BYTES => {
+            Err(Error::AuthFailed("Pipeline text is too large".into()))
+        }
+        Value::Object(object) => {
+            if object.len() > MAX_OBJECT_FIELDS {
+                return Err(Error::AuthFailed(
+                    "Pipeline object has too many fields".into(),
+                ));
+            }
+            for value in object.values() {
+                check_value(value, depth + 1)?;
+            }
+            Ok(())
+        }
+        Value::Array(values) => {
+            if values.len() > MAX_ARRAY_ITEMS {
+                return Err(Error::AuthFailed(
+                    "Pipeline array has too many items".into(),
+                ));
+            }
+            for value in values {
+                check_value(value, depth + 1)?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
     }
 }
 
@@ -238,21 +327,24 @@ pub trait Runner: Send + Sync {
 
 /// 调用方提供的副作用幂等存储。
 ///
-/// `begin` 必须由存储实现原子占用同一个 key。新执行返回 `New`，
+/// `begin` 必须由存储实现原子占用同一个 key。新执行返回带 lease 的 `New`，
 /// 已有完成结果返回 `Done`，仍在有效租约内的其他执行返回 `Busy`。
 /// `New` 对应的占用必须带过期时间，进程崩溃后才能由其他进程接管。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Claim {
-    New,
+    New { lease: String },
     Busy,
     Done(Effect),
 }
 
 #[allow(async_fn_in_trait)]
 pub trait Effects: Send + Sync {
-    async fn begin(&self, key: &str) -> Result<Claim>;
-    async fn complete(&self, key: &str, effect: Effect) -> Result<()>;
-    async fn cancel(&self, key: &str) -> Result<()>;
+    /// 原子占用 key，并创建 `timeout` 秒的租约。过期后允许其他进程接管。
+    async fn begin(&self, key: &str, timeout: u64) -> Result<Claim>;
+    /// 只有持有同一个 lease 的执行者才能提交完成结果。
+    async fn complete(&self, key: &str, lease: &str, effect: Effect) -> Result<()>;
+    /// 只有持有同一个 lease 的执行者才能释放占用。
+    async fn cancel(&self, key: &str, lease: &str) -> Result<()>;
 }
 
 /// 在内置能力之外组合自定义节点处理器。

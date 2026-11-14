@@ -8,10 +8,10 @@ impl Magic {
     pub fn issue(
         config: MagicLinkConfig,
         email: &str,
-        user_id: Option<&str>,
+        subject: Option<&str>,
         scene: &str,
     ) -> Result<(String, String)> {
-        let (token, url, _) = magic::issue(&config, email, user_id, scene, None)?;
+        let (token, url, _) = magic::issue(&config, email, subject, scene, None)?;
         Ok((token, url))
     }
 
@@ -19,10 +19,10 @@ impl Magic {
         config: MagicLinkConfig,
         kv: &K,
         email: &str,
-        user_id: Option<&str>,
+        subject: Option<&str>,
         scene: &str,
     ) -> Result<(String, String)> {
-        let (token, url, payload) = magic::issue(&config, email, user_id, scene, None)?;
+        let (token, url, payload) = magic::issue(&config, email, subject, scene, None)?;
         kv.set(&magic::key(&payload), &token, magic::ttl(&payload))
             .await?;
         Ok((token, url))

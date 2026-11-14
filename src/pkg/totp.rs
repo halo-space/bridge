@@ -2,9 +2,12 @@ use crate::error::{Error, Result};
 use hmac::{Hmac, Mac};
 use rand_core::{OsRng, RngCore};
 use sha1::Sha1;
+use sha2::{Sha256, Sha512};
 use url::Url;
 
 type HmacSha1 = Hmac<Sha1>;
+type HmacSha256 = Hmac<Sha256>;
+type HmacSha512 = Hmac<Sha512>;
 
 const BASE32_ALPHABET: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
@@ -64,6 +67,42 @@ fn base32_decode(encoded: &str) -> Result<Vec<u8>> {
 /// 基于 RFC 6238 的时间动态口令 (对齐 Authing 3.2.1 TOTP)
 pub struct Totp;
 
+/// TOTP 校验参数。默认值对应 RFC 6238 常用配置。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Config {
+    pub algorithm: Algorithm,
+    pub digits: u32,
+    pub period: u64,
+    pub window: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Algorithm {
+    Sha1,
+    Sha256,
+    Sha512,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            algorithm: Algorithm::Sha1,
+            digits: 6,
+            period: 30,
+            window: 1,
+        }
+    }
+}
+
+impl Config {
+    fn valid(self) -> Result<Self> {
+        if !(6..=8).contains(&self.digits) || self.period == 0 || self.window > 10 {
+            return Err(Error::AuthFailed("Invalid TOTP configuration".into()));
+        }
+        Ok(self)
+    }
+}
+
 impl Totp {
     pub const PERIOD: u64 = 30; // 30 秒步长
     pub const DIGITS: u32 = 6; // 6 位数字
@@ -75,10 +114,10 @@ impl Totp {
         base32_encode(&bytes)
     }
 
-    /// 根据用户专属 Salt 和用户 ID 派生生成强绑定的 TOTP 秘钥 (RFC 6238 Base32)
-    pub fn derive_secret_with_salt(user_id: i64, user_salt: &str) -> String {
+    /// 根据调用方主体和专属 Salt 派生 TOTP Secret。
+    pub fn derive_secret_with_salt(subject: &str, user_salt: &str) -> String {
         use sha2::{Digest, Sha256};
-        let seed = format!("halo:totp:salt_bound:{}:{}", user_id, user_salt);
+        let seed = format!("halo:totp:salt_bound:{}:{}", subject, user_salt);
         let mut hasher = Sha256::new();
         hasher.update(seed.as_bytes());
         let hash = hasher.finalize();
@@ -123,48 +162,95 @@ impl Totp {
 
     /// 计算指定时间戳的 6 位数字口令
     pub fn generate_code(secret: &str, timestamp: u64) -> Result<String> {
+        Self::generate_with(secret, timestamp, Config::default())
+    }
+
+    /// 按调用方参数生成 TOTP。
+    pub fn generate_with(secret: &str, timestamp: u64, config: Config) -> Result<String> {
+        let config = config.valid()?;
         let key_bytes = base32_decode(secret)?;
-        let step = timestamp / Self::PERIOD;
+        let step = timestamp / config.period;
         let step_bytes = step.to_be_bytes();
 
-        let mut mac = HmacSha1::new_from_slice(&key_bytes)
-            .map_err(|e| Error::Internal(format!("HMAC key error: {e}")))?;
-        mac.update(&step_bytes);
-        let result = mac.finalize().into_bytes();
+        let result = match config.algorithm {
+            Algorithm::Sha1 => {
+                let mut mac = HmacSha1::new_from_slice(&key_bytes)
+                    .map_err(|e| Error::Internal(format!("HMAC key error: {e}")))?;
+                mac.update(&step_bytes);
+                mac.finalize().into_bytes().to_vec()
+            }
+            Algorithm::Sha256 => {
+                let mut mac = HmacSha256::new_from_slice(&key_bytes)
+                    .map_err(|e| Error::Internal(format!("HMAC key error: {e}")))?;
+                mac.update(&step_bytes);
+                mac.finalize().into_bytes().to_vec()
+            }
+            Algorithm::Sha512 => {
+                let mut mac = HmacSha512::new_from_slice(&key_bytes)
+                    .map_err(|e| Error::Internal(format!("HMAC key error: {e}")))?;
+                mac.update(&step_bytes);
+                mac.finalize().into_bytes().to_vec()
+            }
+        };
 
         // 动态截断 Dynamic Truncation (RFC 4226)
-        let offset = (result[19] & 0x0F) as usize;
-        let binary = (((result[offset] & 0x7F) as u32) << 24)
-            | ((result[offset + 1] as u32) << 16)
-            | ((result[offset + 2] as u32) << 8)
-            | (result[offset + 3] as u32);
+        let offset = (result[result.len() - 1] & 0x0F) as usize;
+        let binary = (u32::from(result[offset] & 0x7F) << 24)
+            | (u32::from(result[offset + 1]) << 16)
+            | (u32::from(result[offset + 2]) << 8)
+            | u32::from(result[offset + 3]);
 
-        let code_num = binary % 10u32.pow(Self::DIGITS);
-        Ok(format!("{:06}", code_num))
+        let code_num = binary % 10u32.pow(config.digits);
+        Ok(format!(
+            "{:0width$}",
+            code_num,
+            width = config.digits as usize
+        ))
     }
 
     /// 校验用户提交的 6 位动态口令（允许 ±1 步长即 ±30 秒的时钟偏移）
     pub fn verify_code(secret: &str, code: &str, current_timestamp: u64) -> Result<bool> {
+        Self::verify_with(secret, code, current_timestamp, Config::default())
+    }
+
+    /// 按调用方参数校验 TOTP。
+    pub fn verify_with(
+        secret: &str,
+        code: &str,
+        current_timestamp: u64,
+        config: Config,
+    ) -> Result<bool> {
+        let config = config.valid()?;
         let code = code.trim();
-        if code.len() != (Self::DIGITS as usize) {
+        if code.len() != (config.digits as usize) {
             return Ok(false);
         }
 
         // 容差窗口：前一步长、当前步长、后一步长
-        let steps = [
-            current_timestamp.saturating_sub(Self::PERIOD),
-            current_timestamp,
-            current_timestamp + Self::PERIOD,
-        ];
-
-        for t in steps {
-            if let Ok(expected) = Self::generate_code(secret, t)
-                && expected == code
+        let step = config.period.saturating_mul(u64::from(config.window));
+        let start = current_timestamp.saturating_sub(step);
+        let end = current_timestamp.saturating_add(step);
+        let mut timestamp = start;
+        while timestamp <= end {
+            if let Ok(expected) = Self::generate_with(secret, timestamp, config)
+                && same(expected.as_bytes(), code.as_bytes())
             {
                 return Ok(true);
             }
+            if timestamp > u64::MAX - config.period {
+                break;
+            }
+            timestamp += config.period;
         }
 
         Ok(false)
     }
+}
+
+fn same(left: &[u8], right: &[u8]) -> bool {
+    let mut diff = left.len() ^ right.len();
+    for (a, b) in left.iter().zip(right) {
+        diff |= usize::from(a ^ b);
+    }
+    diff == 0
 }

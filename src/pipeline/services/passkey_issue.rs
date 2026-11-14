@@ -1,6 +1,6 @@
 use super::*;
 
-impl<S, U, F, P, E, D> Services<S, U, F, P, E, D>
+impl<S, U, F, P, E, D, L> Services<S, U, F, P, E, D, L>
 where
     S: Secrets,
     U: Users,
@@ -8,6 +8,7 @@ where
     P: Passkeys,
     E: Events,
     D: Devices,
+    L: Limits,
 {
     pub(super) async fn issue_passkey(&self, node: &Node, context: &Context) -> Result<Output> {
         let passkey = self
@@ -18,7 +19,6 @@ where
         if data.get("name").is_some() && data.get("display_name").is_some() {
             let subject = data
                 .get("subject")
-                .or_else(|| data.get("user_id"))
                 .and_then(Value::as_str)
                 .ok_or_else(|| Error::AuthFailed("Missing field: subject".into()))?;
             let start = passkey.issue(

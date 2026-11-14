@@ -1,4 +1,5 @@
 use super::*;
+use sha2::{Digest, Sha256};
 
 impl Flow {
     /// 生成授权码并存入缓存
@@ -6,7 +7,7 @@ impl Flow {
     pub async fn issue_code<K: Secrets>(
         kv: &K,
         client_id: &str,
-        user_id: i64,
+        identity: Identity,
         redirect_uri: &str,
         scope: &str,
         code_challenge: Option<String>,
@@ -16,7 +17,7 @@ impl Flow {
         Self::issue_code_with_nonce(
             kv,
             client_id,
-            user_id,
+            identity,
             redirect_uri,
             scope,
             code_challenge,
@@ -31,7 +32,7 @@ impl Flow {
     pub async fn issue_code_with_nonce<K: Secrets>(
         kv: &K,
         client_id: &str,
-        user_id: i64,
+        identity: Identity,
         redirect_uri: &str,
         scope: &str,
         code_challenge: Option<String>,
@@ -45,7 +46,7 @@ impl Flow {
         let auth_code = AuthCode {
             code: code.clone(),
             client_id: client_id.to_string(),
-            user_id,
+            identity,
             redirect_uri: redirect_uri.to_string(),
             scope: scope.to_string(),
             code_challenge,
@@ -55,7 +56,7 @@ impl Flow {
         };
 
         let val = serde_json::to_string(&auth_code).map_err(|e| Error::Internal(e.to_string()))?;
-        kv.set(&format!("code:{}", code), &val, ttl).await?;
+        kv.set(&key(&code), &val, ttl).await?;
         Ok(code)
     }
     /// 授权码换 Token 校验（单次使用消费 + PKCE 校验 + Client 密钥校验）
@@ -72,7 +73,7 @@ impl Flow {
             ));
         }
 
-        let key = format!("code:{code_str}");
+        let key = key(code_str);
         // 先读取并完成所有校验，最后再消费，避免错误请求提前销毁授权码。
         let val = kv.get(&key).await?.ok_or(Error::InvalidCode)?;
 
@@ -108,6 +109,28 @@ impl Flow {
             }
         }
 
+        if !client
+            .grant_types
+            .iter()
+            .any(|grant| grant == "authorization_code")
+        {
+            return Err(Error::InvalidClient(
+                "Authorization code grant is disabled".into(),
+            ));
+        }
+
+        let allowed_scopes: std::collections::HashSet<&str> =
+            client.scope.split_whitespace().collect();
+        if auth_code
+            .scope
+            .split_whitespace()
+            .any(|scope| !allowed_scopes.contains(scope))
+        {
+            return Err(Error::InvalidClient(
+                "Authorization scope is not allowed".into(),
+            ));
+        }
+
         // 5. PKCE 校验
         if let Some(challenge) = &auth_code.code_challenge {
             let verifier = req.code_verifier.as_deref().ok_or(Error::InvalidPkce)?;
@@ -126,4 +149,74 @@ impl Flow {
 
         Ok(auth_code)
     }
+
+    /// 将授权码或 Refresh Token 兑换为标准 OIDC TokenResponse。
+    pub async fn exchange<CS: Clients, K: Secrets>(
+        client_store: &CS,
+        token: &Token,
+        kv: &K,
+        req: &TokenRequest,
+    ) -> Result<TokenResponse> {
+        if req.grant_type == "refresh_token" {
+            return Self::exchange_refresh_token(client_store, token, kv, req).await;
+        }
+
+        let auth_code = Self::exchange_code(client_store, kv, req).await?;
+        let client = client_store
+            .find_client(&req.client_id)
+            .await?
+            .ok_or_else(|| Error::InvalidClient(req.client_id.clone()))?;
+        let (access_token, refresh_token) = if client
+            .grant_types
+            .iter()
+            .any(|grant| grant == "refresh_token")
+        {
+            let (access, refresh) = token.issue_identity(
+                &auth_code.identity,
+                Some(req.client_id.clone()),
+                Some(auth_code.scope.clone()),
+            )?;
+            (access, Some(refresh))
+        } else {
+            (
+                token.issue_access(
+                    &auth_code.identity,
+                    Some(req.client_id.clone()),
+                    Some(auth_code.scope.clone()),
+                )?,
+                None,
+            )
+        };
+        let id_token = if auth_code
+            .scope
+            .split_whitespace()
+            .any(|scope| scope == "openid")
+        {
+            Some(token.issue_id_identity(
+                &auth_code.identity,
+                req.client_id.clone(),
+                auth_code.nonce.clone(),
+                Some(auth_code.scope.clone()),
+            )?)
+        } else {
+            None
+        };
+        Ok(TokenResponse {
+            access_token,
+            token_type: "Bearer".into(),
+            expires_in: token.access_ttl(),
+            refresh_token,
+            id_token,
+            scope: Some(auth_code.scope),
+        })
+    }
+}
+
+fn key(code: &str) -> String {
+    let digest = Sha256::digest(code.as_bytes());
+    let value = digest
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    format!("code:{value}")
 }

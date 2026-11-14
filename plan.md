@@ -1,203 +1,148 @@
-# bridge 实施计划
+# bridge 后续完成计划
 
-本文是开发计划，记录架构和验收项。普通接入者请阅读 [README.md](README.md) 和 [USAGE.md](USAGE.md)；其中 `issuer` 表示生成，`sender` 表示发送，`verifier` 表示检查。
+这份计划只记录当前还没有完成的能力和架构收口项。每项完成后必须同时更新代码、测试、USAGE 和 README，再勾选对应项目。
 
-范围只包含 `bridge`。应用层数据库、缓存、HTTP 路由和调用方迁移不纳入本计划。
+## 范围
 
-## 重构原则
+bridge 负责认证协议、认证材料、Token、Pipeline 和可复用扩展契约。
 
-- 所有新增和修改遵守 [CONSTRAINTS.md](CONSTRAINTS.md)。
-- 优先拆职责边界，再补实现；不通过继续扩大总入口文件解决新能力。
-- 保持公共 API 的词汇简短清晰，具体实现文件不重复父模块表达的能力名。
+调用方负责 HTTP 路由、Session、业务用户、账号绑定、租户、组织、权限、数据库、缓存、UserInfo 端点和 Introspection 端点。
 
-## 当前重构批次
+bridge 不新增 RBAC、业务用户中心、Session 管理和租户字段。
 
-- [x] P0：公开 `resume` 只接受调用方提交的 `Input`，通过结果只能来自 Runner
-- [x] P0：校验输入节点的必填字段并拒绝提交到错误节点
-- [x] P0：身份不一致时立即终止 Run，Runner 的可重试错误按 `retries` 计数
-- [x] P0：完成节点清理已消费的认证输入，签发节点的短期材料只保留到下一步消费
-- [x] P1：Effects 增加 `Busy` 状态和调用方租约过期边界
-- [x] P0：拒绝结果写入 Run，后续调用不能从终止状态继续推进
-- [x] P0：Runner 只收到当前节点和当前路径的输入与证据
-- [x] P0：增加 `Run::clear`，支持调用方外置短期材料后保存暂停状态
-- [x] P1：恢复码校验改为只校验并返回匹配值，单次删除由调用方原子完成
-- [x] P1：Token 撤销键只保存摘要，不把完整 Token 写入调用方存储键
-- [x] P1：SAML `check` 和 `check_state` 强制要求调用方提供原子重放缓存
-- [x] P1：验证码失败次数只允许使用 `Secrets::incr` 原子递增
+## P0：先完成核心闭环
 
-- [x] P0：隔离 Run 的短期认证输入，清理完成节点的敏感数据。
-- [x] P0：移除固定 Magic Link 密钥，未知通知供应商显式报错。
-- [x] P1：拆分 Pipeline 模型、状态和执行引擎。
-- [x] P1：拆分内置 Services 为按能力划分的文件。
-- [x] P1：拆分 OIDC Flow 和短信供应商实现。
-- [x] P1：让 Store 契约依赖中立模型。
-- [x] P2：接通可注册密码算法和显式通知通道。
-- [x] P2：移除 RSA 全局密钥、`decrypt_or_raw` 和原始值回退。
-- [x] P2：统一 bridge 公共命名、日志目标和 feature 边界。
-- [x] P1：收敛重复公共命名并按 issuer、verifier 拆分 Magic Link、Passkey 和 Captcha 职责。
+### 1. OIDC 服务端核心闭环
 
-## 已完成
+- [x] 授权码兑换可以完成统一的 TokenResponse。
+- [x] 根据 scope 生成 access token、refresh token 和 ID token。
+- [x] 校验 client、redirect_uri、PKCE、nonce、client authentication、scope 和 grant type。
+- [x] 明确 Token 的过期时间、token_type、scope 和 ID token claims。
+- [x] Refresh Token 轮换失败时不能产生半完成状态。
+- [x] 增加授权码兑换、TokenResponse、ID token 和 refresh rotation 的完整测试。
 
-### 架构整理
+完成标准：调用方只提供身份主体和 Token 配置，bridge 可以返回标准 OAuth/OIDC TokenResponse；bridge 不创建用户、不保存 Session。
 
-- [x] OIDC 统一归入 `factor/oidc`
-- [x] 外部 OIDC Provider 归入 `factor/oidc/provider`
-- [x] `types.rs` 拆成 `types/`
-- [x] `store.rs` 拆成 `store/`
-- [x] Token 拆成 Claims、Service、JWKS
-- [x] Captcha 拆成模型、服务和具体类型
-- [x] 企业 OIDC、SAML 拆成配置、模型和协议服务
-- [x] Store 契约使用 Users、Clients、Secrets、Factors、Passkeys、Events、Limits
+### 2. 统一身份主体模型
 
-### 认证能力
+- [x] 定义不依赖本地数据库 ID 的主体模型。
+- [x] OIDC 授权码、Refresh Token、Passkey、TOTP、Provider 和审计统一使用主体或 Identity。
+- [x] 移除协议核心对 User 和 i64 user_id 的强制依赖。
+- [x] 为现有账号密码能力保留调用方适配入口，不把本地账号模型变成 bridge 的中心模型。
+- [x] 增加不同 Provider、不同主体格式和身份不一致的测试。
 
-- [x] 密码、邮箱验证码、短信验证码、TOTP
-- [x] 图形、滑块、旋转、点选验证码
-- [x] 恢复码和 Magic Link
-- [x] GitHub、飞书、Google、微信
-- [x] LDAP、企业微信、钉钉
-- [x] OIDC Authorization Code、PKCE、state、nonce
-- [x] Refresh Token rotation 和撤销
-- [x] Passkey 数据模型、注册结果、条件计数器更新契约
+完成标准：bridge 可以处理字符串主体、外部 Provider 主体和调用方自定义主体，不要求业务用户表使用整数 ID。
 
-## 阶段一：Passkey 完整闭环
+### 3. 外部 OIDC Provider 完整流程
 
-- [x] 增加真实 WebAuthn 注册样例
-- [x] 增加真实 WebAuthn 认证样例
-- [x] 验证重复 Credential ID 和计数器竞争
-- [x] 明确 `last_used_at`、backup 状态和重放处理
+- [x] 增加授权地址构造。
+- [x] 增加 authorization code 兑换。
+- [x] 增加 Discovery 和 JWKS 读取契约。
+- [x] 校验 ID token 签名、issuer、audience、过期时间、nonce 和 PKCE。
+- [x] 将验证后的 claims 转换为统一 Profile 和 Identity。
+- [x] 外部 OIDC Provider 失败、过期、错误 issuer、错误 audience 和错误 nonce 必须有测试。
 
-验收条件是注册、认证、持久化读取和计数器更新都能通过真实协议数据测试。`Passkey` 保存注册时的用户验证和备份标记，`Auth` 返回认证时的最新标记、`needs_update` 和更新后的凭证数据。`Passkeys::update` 使用旧计数器做原子条件更新，保存完整凭证状态。认证状态必须由调用方以单次凭证保存并消费，bridge 不管理 Session；错误浏览器验证数据已有失败测试。
+完成标准：外部 OIDC 登录可以从授权地址、回调 code 一直到标准 Identity，调用方再决定是否绑定业务用户。
 
-## 阶段二：SAML 完整闭环
+## P1：生产安全和扩展边界
 
-- [x] 增加真实身份源元数据和签名响应样例
-- [x] 增加断言重放测试
-- [x] 增加 SP 发起流程状态关联
-- [x] 明确重复使用记录的接口和失败策略
+### 4. 短期凭证原子生命周期
 
-验收条件是签名、签发方、接收方、时间窗口、状态关联和重复使用防护都有失败测试。`SamlAuth::start` 返回流程编号，`check` 和 `check_state` 都强制使用调用方的重复使用记录，`check_state` 还会关联流程编号。
+- [x] 扩展 Secrets，提供统一的原子占用或消费能力。
+- [x] Refresh Token 轮换使用原子占用。
+- [x] OIDC state、nonce、Passkey state 和 Device nonce 支持过期、单次消费和并发安全。
+- [x] 授权码和 Device nonce 的存储键改为摘要或随机句柄，不直接使用凭证值。
+- [x] 增加并发重复消费测试。
 
-## 阶段三：Pipeline 编排
+### 5. 频控和锁定接入 Pipeline
 
-- [x] 支持认证方式顺序
-- [x] 支持认证强度和有效期
-- [x] 支持失败终止
-- [x] 支持追加因子
-- [x] 支持密码加 TOTP、社交加验证码、密码加 Passkey
-- [x] 保持 Pipeline 不管理 Session、权限和业务用户
+- [x] Services 支持调用方注入 Limits。
+- [x] 短信、邮件、验证码、密码和 TOTP 节点可以使用频控。
+- [x] 接入锁定规则的读取、失败递增、成功清零和锁定时间。
+- [x] 风险引擎可以作为 Pipeline 的可选检查节点使用。
+- [x] 频控和锁定仍由调用方提供存储，bridge 不添加租户字段。
 
-验收条件是 Pipeline 能表达输入、检查、签发、发送、校验和后置动作，由内置 `Services` 绑定现有 issuer、sender、verifier、factor 和 store，并通过可序列化运行状态输出下一步、路由分支、All/Any 汇聚、有限循环、重试、拒绝或完成结果。
+### 6. Pipeline 执行边界
 
-## 阶段四：协议扩展
+- [x] timeout 支持调用方明确传入执行租约或取消边界。
+- [x] Effects 的占用契约包含租约有效期、完成、取消和接管规则。
+- [x] 明确 fan-out 是顺序执行还是由调用方并发执行，并在 API 和文档中统一说明。
+- [x] 明确 Pipeline 是严格 DAG，还是允许带上限的回边图；代码、命名和测试保持一致。
+- [x] Runner 错误区分临时错误和业务拒绝，不能把所有 OAuth、短信和邮件错误都自动重试。
+- [x] 运行状态支持可信存储边界、TTL 和配置版本校验；不允许不可信客户端直接修改 Run。
 
-- [x] 决定 UserInfo 是否进入核心实现
-- [x] 决定 Introspection 是否进入核心实现
-- [x] 继续保持 Discovery 与实际能力一致
-- [x] 明确是否实现隐式授权
+### 7. 密码和 TOTP 安全能力
 
-结论：bridge 只提供 OIDC 流程校验、Token 校验和外部 Provider 资料转换，不维护业务用户，因此不提供 UserInfo 端点；Introspection 由调用方使用 `Token::verify_live` 后组装响应；Discovery 只声明 Authorization Code、PKCE、JWKS 和撤销；隐式授权不实现，统一使用 Authorization Code + PKCE。
+- [x] PBKDF2、SM3 和 TOTP 校验统一使用常量时间比较。
+- [x] SM3 改为适合密码存储的 KDF 形式，或明确限制为兼容算法并给出安全边界。
+- [x] PBKDF2 参数增加上限，避免恶意参数造成 CPU 消耗。
+- [x] TOTP 支持调用方配置算法、位数、周期和允许偏移。
+- [x] TOTP Secret 增加绑定、启用、停用和替换时的调用方存储契约说明。
 
-## 阶段五：企业设备因子
+### 8. Passkey 状态和存储闭环
 
-- [x] 定义 Device 的认证协议
-- [x] 定义设备密钥和设备状态模型
-- [x] 定义设备注册、撤销和校验接口
-- [x] 决定 Device 是否进入 `factor/enterprise`
+- [x] 注册和认证状态明确由调用方以短期单次凭证保存和消费。
+- [x] 状态过期、重复使用、错误主体和错误凭证必须拒绝。
+- [x] 计数器 CAS、凭证主体和认证结果更新保持一个明确的原子边界。
+- [x] 未知 Credential ID 不能被当作认证成功。
+- [x] 增加并发认证、重复状态和跨主体认证测试。
 
-## 阶段六：安全审计
+### 9. 通知和 Provider 扩展
 
-- [x] 移除 Users、Clients、Factors、Passkeys 和 Devices 的租户参数；命名空间由调用方控制
-- [x] 明确 Token 撤销校验的统一入口
-- [x] 补充 Refresh Token 对用户状态的检查边界
-- [x] 设计 RSA 密钥持久化和轮换契约
-- [x] 区分邮件短信 Mock 与生产发送失败
-- [x] 明确 Events 写入失败、幂等和追踪字段
-- [x] 增加 Provider 网络错误和失败响应测试
-- [x] 删除未导出的企业目录同步遗留代码
+- [x] 邮件发送增加与短信一致的可替换 Sender 契约。
+- [x] Notify 支持调用方注入自定义邮件和短信通道。
+- [x] GitHub、Google、微信、飞书、企业微信和钉钉统一输出 Profile 或 Identity。
+- [x] Provider 统一错误分类、超时、重试和响应字段校验。
+- [x] Provider 仍由调用方 Runner 接入 Pipeline，不自动绑定本地用户。
 
-## 阶段七：Pipeline 执行闭环
+## P2：结构、性能和维护质量
 
-- [x] 增加 `Event::Input`，区分原始输入和节点通过结果
-- [x] 增加 `Pipeline::run`，自动推进可执行节点
-- [x] 增加内置 `Services`，统一绑定 issuer、sender、verifier、factor 和 store
-- [x] 覆盖滑块、短信签发、短信发送、短信校验、TOTP、密码和审计流程
-- [x] 增加 Pipeline 基准程序和外部流程验证
+### 10. Services 和能力注册
 
-验收结果：滑块 → 验证码签发 → 短信发送 → 短信校验 → 审计、TOTP 和密码流程均已通过集成测试；Release 基准中 10,000 轮纯 Pipeline 状态推进约 5.05µs/轮。
+- [x] Services 的内置能力表继续保持显式注册，移除重复兼容别名。
+- [x] 自定义能力使用公开注册接口，不修改 bridge 内部字符串分派。
+- [x] issuer、sender、verifier 可以独立替换，不要求调用方替换整个 Services。
+- [x] 每个能力码、参数、版本和 Runner 支持情况保持一致。
 
-## 阶段八：统一扩展能力
+### 11. 运行状态和数据保护
 
-- [x] 增加短信 `Sender` 适配器和 Tencent API 3.0 实现
-- [x] 增加 `Fallback` 组合自定义 Pipeline 节点
-- [x] 允许调用方覆盖与内置能力同名的节点实现
-- [x] 按当前流程分支传递输入，避免不同分支字段混用
-- [x] 增加 Device nonce 单次消费
+- [x] 为 Context、Evidence、Run 和 Provider 原始资料增加大小边界。
+- [x] 敏感数据由显式类型或字段标记控制，不只依赖字段名猜测。
+- [x] 审计 metadata 在写入前完成敏感字段清理。
+- [x] 运行状态序列化、恢复、过期和清理流程补齐测试。
 
-## 阶段九：配置执行闭环
+### 12. 审计和规则模型
 
-- [x] 页面配置使用 `PipelineConfig` 和固定 `type/code/args` 结构
-- [x] 使用 `Cards` 校验已注册能力码和必需参数
-- [x] 自定义 Runner 通过 `node.args` 获取页面参数
-- [x] Run 绑定 Pipeline 配置版本和 hash
-- [x] Verify 节点区分用户输入和上游继承数据
-- [x] Effect 节点按当前 payload 读取数据，避免并行分支混用
-- [x] 增加每个 Card 的完整参数 Schema 和页面 Schema 导出
-- [x] 增加基础能力 Schema 导出
-- [x] 增加 Secret 配置引用
-- [x] 增加 Effect 单次执行策略
-- [x] 增加节点 timeout/retry/idempotency 策略字段
-- [x] 增加 Runner 能力和版本校验
-- [x] 将内置 Services 的能力码分派收敛为显式注册表
-- [x] 增加完整 Card 参数 Schema 和页面配置 Schema
-- [x] 增加参数类型、未知参数、Secret 引用和边路由校验
-- [x] 增加所有节点子图的回边和执行策略校验
-- [x] 增加 `Effects` 原子副作用声明、完成和取消契约
-- [x] 让 `retries` 落实为 Runner 执行次数上限
-- [x] 清理 Clippy 严格检查问题
-- [x] Run 序列化覆盖 request、meta 和副作用数据的敏感字段
-- [x] 内置 Services 显式声明支持的能力码
-- [x] Passkey 节点只读取当前分支输入，禁止跨分支扫描认证信息
-- [x] 短信和邮件验证码 scene 沿 Pipeline payload 贯穿签发、发送和校验
-- [x] OIDC 授权码兑换检查自身 expires_at
-- [x] Passkey 注册使用调用方身份标识，不要求业务 ID 为 UUID
-- [x] Passkey 状态只使用结构化 state，并在独立登录时输出 Identity
-- [x] Token 拒绝无效密钥、issuer 和 TTL
+- [x] 内置审计节点覆盖支持的审计事件，未支持事件显式返回错误。
+- [x] 审计模型不强制依赖本地 user_id，可直接记录 Identity 或主体。
+- [x] 风险、锁定、重认证规则和 Pipeline 节点的输入输出格式统一。
 
-## 阶段十：调用方执行边界
+### 13. Feature 和依赖拆分
 
-- [x] 明确 `Effects` 由调用方提供跨进程原子实现
-- [x] 明确 `timeout` 由调用方 async runtime 负责中断
-- [x] Provider 增加 HTTP 业务错误响应样例
-- [x] Provider 增加本地 HTTP 成功链路样例
-- [x] Provider 统一 HTTP client、连接超时和请求超时
-- [x] Provider 完善可替换的用户资料端点
-- [x] 明确社交和企业 Provider 通过调用方 Runner 接入 Pipeline
-- [x] Captcha 失败次数增加调用方可选的原子递增契约
+- [x] OIDC 核心、外部 OIDC Provider、社交 Provider、企业 Provider 和 Passkey 的 feature 边界独立。
+- [x] 不使用某个 Provider 时不引入对应 HTTP 或协议依赖。
+- [x] 完成默认 feature、无 feature、social、enterprise、passkey 的编译矩阵。
 
-## 阶段十一：公共命名与职责边界收口
+### 14. 测试和发布质量
 
-- [x] issuer、verifier 和 OIDC 类型改为模块上下文下的简短命名
-- [x] Magic Link 拆分纯签名核心、issuer 签发和 verifier 消费
-- [x] Passkey 拆分 issuer 发起和 verifier 完成校验
-- [x] Captcha 拆分验证码题目生成、答案校验和通过凭证签发
-- [x] Captcha 通过凭证必须绑定 verifier 的一次性成功标记
-- [x] Captcha 具体类型拆分 issuer 生成和 verifier 校验
-- [x] Device 拆分模型、nonce 签发和证明校验
-- [x] Pipeline present 检查只读取当前节点 payload
-- [x] Token、RSA、通知门面和社交静态包装完成命名收口
+- [x] 增加 OIDC、Refresh Token、Passkey、验证码和 Effects 的并发测试。
+- [x] 增加 Pipeline 配置、Provider 响应、Token claims 和存储状态的属性测试或模糊测试。
+- [x] 增加真实协议样例和可控 Mock 服务测试。
+- [x] 增加密码、TOTP、Token、Pipeline、Provider 和 Sender 的 benchmark。
+- [x] 增加 CI、MSRV、clippy、rustdoc、依赖安全检查和 feature 矩阵。
 
-`Cards::schema()` 现在导出 JSON Schema、能力码和每个 Card 的参数 Schema。Pipeline 会拒绝重复节点、重复 route、空能力码、错误参数类型、未知参数、非法 Secret 引用和未限制的任意子图回边。`Effects` 提供跨进程幂等所需的原子 begin/complete/cancel 契约，并用 `Busy` 表示其他进程持有租约；bridge 不选择具体数据库或缓存。`retries` 由 Pipeline 记录每个节点实际交给 Runner 的次数并执行上限，`timeout` 在 Runner 返回后检查耗时，真正的任务中断由调用方异步运行时负责，bridge 不绑定具体 runtime。
-
-结论：`verify_token` 只做签名和 Claims 校验；需要实时状态的请求统一使用 `verify_live`。Refresh Token 换发通过 `Users` 检查用户存在和 `is_active`，业务命名空间、租户关系和用户数据由调用方管理。撤销键使用 Token 摘要，避免完整凭证进入存储键名。RSA 必须由调用方显式创建或使用 `from_private_pem` 加载持久化密钥，`private_key_pem` 导出，`rotate` 显式轮换；不提供全局密钥或原始值回退。短信和邮件 sender 的 `strict` 模式用于生产失败闭环，关闭时保留开发 Mock 行为。Events 使用 `event.id` 幂等，并支持 trace/request 字段；写入失败由存储实现返回错误。SAML 必须通过带重放缓存的校验入口，缓存由调用方提供。
-
-## 调用方负责业务范围
-
-bridge 不感知租户，也不为验证码、授权码、设备、Passkey 或审计事件自动建立租户隔离。调用方应在自己的存储键、存储参数或请求上下文中带上租户、应用和平台信息，并检查记录是否属于当前业务范围。bridge 只负责协议、安全信息的有效期和一次性消费，以及身份标识的一致性检查。
-
-## 验收命令
+## 每项完成时的验收
 
 ```bash
-cargo check
-cargo test
+cargo fmt --all -- --check
+cargo check --workspace
+cargo check --no-default-features
+cargo check --no-default-features --features "social,enterprise"
+cargo test --workspace --all-targets
+cargo clippy --all-targets --all-features -- -D warnings
+cargo clippy --no-default-features --lib -- -D warnings
+RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
+git diff --check
 ```
+
+代码、测试、README、USAGE 和本计划必须一起更新，未通过验收的项目不能勾选完成。

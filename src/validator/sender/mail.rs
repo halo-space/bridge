@@ -5,6 +5,9 @@ use lettre::transport::smtp::authentication::Credentials;
 use lettre::transport::smtp::client::{Tls, TlsParameters};
 use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 use serde::{Deserialize, Serialize};
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
 
 fn default_port() -> u16 {
     465
@@ -50,6 +53,19 @@ pub struct SmtpConfig {
     pub encryption: String,
 }
 
+pub type BoxFuture<'a> = Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>;
+
+/// 邮件通道适配器。调用方可以替换 SMTP，保留统一验证码发送入口。
+pub trait Sender: Send + Sync {
+    fn send<'a>(
+        &'a self,
+        to: &'a str,
+        subject: &'a str,
+        html: &'a str,
+        text: Option<&'a str>,
+    ) -> BoxFuture<'a>;
+}
+
 impl Default for SmtpConfig {
     fn default() -> Self {
         Self {
@@ -70,11 +86,23 @@ impl Default for SmtpConfig {
 #[derive(Clone)]
 pub struct SmtpSender {
     config: SmtpConfig,
+    custom: Option<Arc<dyn Sender>>,
 }
 
 impl SmtpSender {
     pub fn new(config: SmtpConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            custom: None,
+        }
+    }
+
+    /// 使用调用方邮件通道，不改动上层验证码生命周期和 Pipeline。
+    pub fn with(config: SmtpConfig, sender: impl Sender + 'static) -> Self {
+        Self {
+            config,
+            custom: Some(Arc::new(sender)),
+        }
     }
 
     pub fn config(&self) -> &SmtpConfig {
@@ -83,6 +111,9 @@ impl SmtpSender {
 
     /// 是否已启用且有效配置
     pub fn is_active(&self) -> bool {
+        if self.custom.is_some() {
+            return self.config.enabled;
+        }
         self.config.enabled
             && !self.config.host.trim().is_empty()
             && !self.config.username.trim().is_empty()
@@ -97,6 +128,15 @@ impl SmtpSender {
         html_body: &str,
         plain_text: Option<&str>,
     ) -> Result<()> {
+        if let Some(sender) = &self.custom {
+            if !self.config.enabled {
+                if self.config.strict {
+                    return Err(Error::EmailFailed("Mail channel is disabled".into()));
+                }
+                return Ok(());
+            }
+            return sender.send(to, subject, html_body, plain_text).await;
+        }
         if !self.is_active() {
             if self.config.strict {
                 return Err(Error::EmailFailed(
@@ -317,5 +357,34 @@ mod tests {
             .send_code("test@example.com", "123456", "login", 300)
             .await;
         assert!(matches!(res, Err(Error::EmailFailed(_))));
+    }
+
+    #[tokio::test]
+    async fn test_custom_sender_reuses_mail_facade() {
+        struct Test;
+        impl Sender for Test {
+            fn send<'a>(
+                &'a self,
+                _to: &'a str,
+                _subject: &'a str,
+                _html: &'a str,
+                _text: Option<&'a str>,
+            ) -> BoxFuture<'a> {
+                Box::pin(async { Ok(()) })
+            }
+        }
+        let sender = SmtpSender::with(
+            SmtpConfig {
+                enabled: true,
+                ..SmtpConfig::default()
+            },
+            Test,
+        );
+        assert!(
+            sender
+                .send_code("test@example.com", "123456", "login", 300)
+                .await
+                .is_ok()
+        );
     }
 }

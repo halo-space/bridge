@@ -39,7 +39,7 @@ impl Totp {
         }
 
         let binding = totp_store
-            .find_totp(user.id)
+            .find_totp(&user.identity())
             .await?
             .ok_or(Error::InvalidCredentials)?;
         if !binding.enabled || !Verify::check(&binding.secret, code, timestamp)? {

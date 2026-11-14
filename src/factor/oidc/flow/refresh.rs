@@ -1,14 +1,15 @@
 use super::*;
+use crate::factor::oidc::server::TokenResponse;
+use uuid::Uuid;
 
 impl Flow {
     /// 校验并处理 Refresh Token 换发 (grant_type=refresh_token)
-    pub async fn exchange_refresh_token<C: Clients, U: Users, K: Secrets>(
+    pub async fn exchange_refresh_token<C: Clients, K: Secrets>(
         client_store: &C,
-        user_store: &U,
         token: &Token,
         kv: &K,
         req: &TokenRequest,
-    ) -> Result<(String, String)> {
+    ) -> Result<TokenResponse> {
         if req.grant_type != "refresh_token" {
             return Err(Error::TokenError(
                 "Invalid grant_type, expected refresh_token".to_string(),
@@ -43,34 +44,47 @@ impl Flow {
             ));
         }
 
-        if Self::is_token_revoked(kv, refresh_token).await? {
-            return Err(Error::TokenError("Refresh token revoked".into()));
-        }
-
         let claims = token.verify_refresh(refresh_token)?;
         if claims.aud.as_deref() != Some(req.client_id.as_str()) {
             return Err(Error::InvalidClient("Refresh token client mismatch".into()));
         }
-
-        let user_id = claims
-            .sub
-            .parse()
-            .map_err(|_| Error::TokenError("Invalid subject".into()))?;
-        let user = user_store
-            .find_by_id(user_id)
-            .await?
-            .ok_or(Error::UserNotFound)?;
-        if !user.is_active {
-            return Err(Error::UserDisabled);
+        if Self::is_token_revoked(kv, refresh_token).await? {
+            return Err(Error::TokenError("Refresh token revoked".into()));
         }
 
-        let tokens = token.renew(refresh_token)?;
-        Self::revoke_token(
-            kv,
-            refresh_token,
-            (claims.exp - chrono::Utc::now().timestamp()).max(1) as u64,
-        )
-        .await?;
-        Ok(tokens)
+        let remaining = (claims.exp - chrono::Utc::now().timestamp()).max(1) as u64;
+        let key = crate::token::refresh_key(refresh_token);
+        if !kv
+            .claim(&key, &Uuid::new_v4().to_string(), remaining)
+            .await?
+        {
+            return Err(Error::TokenError("Refresh token already used".into()));
+        }
+
+        let tokens = match token.renew_claims(&claims) {
+            Ok(tokens) => tokens,
+            Err(error) => {
+                let _ = kv.del(&key).await;
+                return Err(error);
+            }
+        };
+        Self::revoke_token(kv, refresh_token, remaining).await?;
+        let id_token = if claims
+            .scope
+            .as_deref()
+            .is_some_and(|scope| scope.split_whitespace().any(|value| value == "openid"))
+        {
+            Some(token.issue_id_claims(&claims, req.client_id.clone())?)
+        } else {
+            None
+        };
+        Ok(TokenResponse {
+            access_token: tokens.0,
+            token_type: "Bearer".into(),
+            expires_in: token.access_ttl(),
+            refresh_token: Some(tokens.1),
+            id_token,
+            scope: claims.scope,
+        })
     }
 }

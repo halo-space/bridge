@@ -1,6 +1,6 @@
 use super::*;
 
-impl<S, U, F, P, E, D> Services<S, U, F, P, E, D>
+impl<S, U, F, P, E, D, L> Services<S, U, F, P, E, D, L>
 where
     S: Secrets,
     U: Users,
@@ -8,6 +8,7 @@ where
     P: Passkeys,
     E: Events,
     D: Devices,
+    L: Limits,
 {
     pub(super) async fn verify_device(&self, context: &Context, data: &Value) -> Result<Output> {
         let device_id = string(data, "device_id")?;

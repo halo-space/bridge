@@ -104,14 +104,15 @@ impl Feishu {
             .json(&app_body)
             .send()
             .await
-            .map_err(|e| Error::OAuthError(format!("Feishu app_access_token error: {e}")))?;
+            .map_err(|e| crate::pkg::http::provider(e, "Feishu app_access_token error"))?;
 
-        let app_json: serde_json::Value = app_resp
-            .error_for_status()
-            .map_err(|e| Error::OAuthError(format!("Feishu app token HTTP error: {e}")))?
-            .json()
-            .await
-            .map_err(|e| Error::OAuthError(format!("Invalid Feishu app_token JSON: {e}")))?;
+        let app_json: serde_json::Value = crate::pkg::http::json(
+            app_resp
+                .error_for_status()
+                .map_err(|e| crate::pkg::http::provider(e, "Feishu app token HTTP error"))?,
+            "Feishu app token",
+        )
+        .await?;
 
         let app_access_token = app_json["app_access_token"].as_str().ok_or_else(|| {
             let message = app_json["msg"]
@@ -137,14 +138,15 @@ impl Feishu {
             .json(&user_token_body)
             .send()
             .await
-            .map_err(|e| Error::OAuthError(format!("Feishu user token error: {e}")))?;
+            .map_err(|e| crate::pkg::http::provider(e, "Feishu user token error"))?;
 
-        let token_json: serde_json::Value = token_resp
-            .error_for_status()
-            .map_err(|e| Error::OAuthError(format!("Feishu user token HTTP error: {e}")))?
-            .json()
-            .await
-            .map_err(|e| Error::OAuthError(format!("Invalid Feishu user token JSON: {e}")))?;
+        let token_json: serde_json::Value = crate::pkg::http::json(
+            token_resp
+                .error_for_status()
+                .map_err(|e| crate::pkg::http::provider(e, "Feishu user token HTTP error"))?,
+            "Feishu user token",
+        )
+        .await?;
 
         let user_access_token = token_json["data"]["access_token"].as_str().ok_or_else(|| {
             let msg = token_json["msg"]
@@ -163,14 +165,15 @@ impl Feishu {
             .header("Authorization", format!("Bearer {user_access_token}"))
             .send()
             .await
-            .map_err(|e| Error::OAuthError(format!("Feishu user_info error: {e}")))?;
+            .map_err(|e| crate::pkg::http::provider(e, "Feishu user_info error"))?;
 
-        let user_json: serde_json::Value = user_resp
-            .error_for_status()
-            .map_err(|e| Error::OAuthError(format!("Feishu user info HTTP error: {e}")))?
-            .json()
-            .await
-            .map_err(|e| Error::OAuthError(format!("Invalid Feishu user_info JSON: {e}")))?;
+        let user_json: serde_json::Value = crate::pkg::http::json(
+            user_resp
+                .error_for_status()
+                .map_err(|e| crate::pkg::http::provider(e, "Feishu user info HTTP error"))?,
+            "Feishu user info",
+        )
+        .await?;
 
         Self::parse(&user_json)
     }

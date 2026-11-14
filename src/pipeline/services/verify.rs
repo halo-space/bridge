@@ -1,6 +1,6 @@
 use super::*;
 
-impl<S, U, F, P, E, D> Services<S, U, F, P, E, D>
+impl<S, U, F, P, E, D, L> Services<S, U, F, P, E, D, L>
 where
     S: Secrets,
     U: Users,
@@ -8,6 +8,7 @@ where
     P: Passkeys,
     E: Events,
     D: Devices,
+    L: Limits,
 {
     pub(super) async fn verify(
         &self,
@@ -16,15 +17,20 @@ where
         kind: &str,
     ) -> Result<Output> {
         let data = node_data(context, node)?;
+        let guard = self.allow(node, context, data).await?;
         if kind == "captcha" || kind.starts_with("captcha.") {
-            let req: CaptchaVerifyReq = serde_json::from_value(data.clone())
-                .map_err(|e| Error::CaptchaFailed(e.to_string()))?;
-            self.captcha_verify.verify(&self.secrets, &req).await?;
-            let token = self
-                .captcha_issue
-                .token(&self.secrets, &req.id, self.code_ttl)
-                .await?;
-            return Ok(pass(json!({ "token": token })));
+            return self
+                .finish(guard, async {
+                    let req: CaptchaVerifyReq = serde_json::from_value(data.clone())
+                        .map_err(|e| Error::CaptchaFailed(e.to_string()))?;
+                    self.captcha_verify.verify(&self.secrets, &req).await?;
+                    let token = self
+                        .captcha_issue
+                        .token(&self.secrets, &req.id, self.code_ttl)
+                        .await?;
+                    Ok(pass(json!({ "token": token })))
+                })
+                .await;
         }
         if kind == "sms" || kind == "code.sms" {
             let phone = string(data, "phone")?;
@@ -33,10 +39,19 @@ where
                 .get("scene")
                 .and_then(Value::as_str)
                 .unwrap_or(SmsCode::SCENE);
-            let user =
-                SmsCode::authenticate_scene(&self.users, &self.secrets, &phone, &code, scene)
+            return self
+                .finish(guard, async {
+                    let user = SmsCode::authenticate_scene(
+                        &self.users,
+                        &self.secrets,
+                        &phone,
+                        &code,
+                        scene,
+                    )
                     .await?;
-            return Ok(identity_pass(user));
+                    Ok(identity_pass(user))
+                })
+                .await;
         }
         if kind == "email" || kind == "code.email" {
             let email = string(data, "email")?;
@@ -45,10 +60,19 @@ where
                 .get("scene")
                 .and_then(Value::as_str)
                 .unwrap_or(EmailCode::SCENE);
-            let user =
-                EmailCode::authenticate_scene(&self.users, &self.secrets, &email, &code, scene)
+            return self
+                .finish(guard, async {
+                    let user = EmailCode::authenticate_scene(
+                        &self.users,
+                        &self.secrets,
+                        &email,
+                        &code,
+                        scene,
+                    )
                     .await?;
-            return Ok(identity_pass(user));
+                    Ok(identity_pass(user))
+                })
+                .await;
         }
         if kind == "totp" {
             let account = string(data, "account")?;
@@ -57,10 +81,19 @@ where
                 .get("timestamp")
                 .and_then(Value::as_u64)
                 .unwrap_or_else(|| chrono::Utc::now().timestamp() as u64);
-            let user =
-                TotpCode::authenticate(&self.users, &self.factors, &account, &code, timestamp)
+            return self
+                .finish(guard, async {
+                    let user = TotpCode::authenticate(
+                        &self.users,
+                        &self.factors,
+                        &account,
+                        &code,
+                        timestamp,
+                    )
                     .await?;
-            return Ok(identity_pass(user));
+                    Ok(identity_pass(user))
+                })
+                .await;
         }
         if kind == "password"
             || kind == "account.password"
@@ -68,20 +101,27 @@ where
             || kind == "phone.password"
         {
             let password = string(data, "password")?;
-            let user = if kind == "email.password" {
-                EmailPassword::authenticate(&self.users, &string(data, "email")?, &password).await?
-            } else if kind == "phone.password" {
-                PhonePassword::authenticate(&self.users, &string(data, "phone")?, &password).await?
-            } else {
-                Account::authenticate(&self.users, &string(data, "account")?, &password).await?
-            };
-            return Ok(identity_pass(user));
+            return self
+                .finish(guard, async {
+                    let user = if kind == "email.password" {
+                        EmailPassword::authenticate(&self.users, &string(data, "email")?, &password)
+                            .await?
+                    } else if kind == "phone.password" {
+                        PhonePassword::authenticate(&self.users, &string(data, "phone")?, &password)
+                            .await?
+                    } else {
+                        Account::authenticate(&self.users, &string(data, "account")?, &password)
+                            .await?
+                    };
+                    Ok(identity_pass(user))
+                })
+                .await;
         }
         if kind == "passkey" || kind == "webauthn" {
-            return self.verify_passkey(context, data).await;
+            return self.finish(guard, self.verify_passkey(context, data)).await;
         }
         if kind == "device" {
-            return self.verify_device(context, data).await;
+            return self.finish(guard, self.verify_device(context, data)).await;
         }
         Err(Error::Unsupported(format!(
             "Unsupported pipeline verifier: {kind}"

@@ -66,14 +66,15 @@ impl Wecom {
             .get(&token_url)
             .send()
             .await
-            .map_err(|e| Error::OAuthError(format!("WeCom access_token network error: {e}")))?;
+            .map_err(|e| crate::pkg::http::provider(e, "WeCom access_token network error"))?;
 
-        let token_json: serde_json::Value = token_resp
-            .error_for_status()
-            .map_err(|e| Error::OAuthError(format!("WeCom token HTTP error: {e}")))?
-            .json()
-            .await
-            .map_err(|e| Error::OAuthError(format!("Invalid WeCom token JSON: {e}")))?;
+        let token_json: serde_json::Value = crate::pkg::http::json(
+            token_resp
+                .error_for_status()
+                .map_err(|e| crate::pkg::http::provider(e, "WeCom token HTTP error"))?,
+            "WeCom token",
+        )
+        .await?;
 
         let access_token = token_json["access_token"].as_str().ok_or_else(|| {
             let err = token_json["errmsg"]
@@ -93,14 +94,15 @@ impl Wecom {
             .get(&user_url)
             .send()
             .await
-            .map_err(|e| Error::OAuthError(format!("WeCom user_info network error: {e}")))?;
+            .map_err(|e| crate::pkg::http::provider(e, "WeCom user_info network error"))?;
 
-        let user_json: serde_json::Value = user_resp
-            .error_for_status()
-            .map_err(|e| Error::OAuthError(format!("WeCom user HTTP error: {e}")))?
-            .json()
-            .await
-            .map_err(|e| Error::OAuthError(format!("Invalid WeCom user JSON: {e}")))?;
+        let user_json: serde_json::Value = crate::pkg::http::json(
+            user_resp
+                .error_for_status()
+                .map_err(|e| crate::pkg::http::provider(e, "WeCom user HTTP error"))?,
+            "WeCom user",
+        )
+        .await?;
 
         Ok(user_json)
     }

@@ -2,6 +2,7 @@
 name = "halo-bridge"
 version = "0.4.8"
 edition = "2024"
+rust-version = "1.85"
 description = "Halo Core Identity Provider, Multi-factor Authentication & OIDC Protocol Engine"
 license = "Apache-2.0"
 repository = "https://github.com/halo-space/bridge"
@@ -14,12 +15,13 @@ name = "halo"
 
 [features]
 default = ["full"]
-full = ["mail", "sms", "social", "enterprise", "passkey"]
+full = ["mail", "sms", "social", "enterprise", "passkey", "oidc"]
 mail = ["dep:lettre", "dep:tracing"]
 sms = ["dep:reqwest", "dep:tracing"]
 social = ["dep:reqwest"]
 enterprise = ["dep:reqwest", "dep:ldap3", "dep:saml"]
 passkey = ["dep:webauthn-rs"]
+oidc = ["dep:reqwest"]
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
@@ -50,9 +52,14 @@ digest = "0.10"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
+proptest = "1"
 
 [[bench]]
 name = "pipeline"
+harness = false
+
+[[bench]]
+name = "security"
 harness = false
 
 [[test]]
@@ -68,9 +75,24 @@ name = "provider_errors"
 required-features = ["social", "enterprise"]
 
 [[test]]
+name = "provider_pipeline"
+required-features = ["social"]
+
+[[test]]
+name = "oidc_provider"
+required-features = ["oidc"]
+
+[[test]]
 name = "saml_tests"
 required-features = ["enterprise"]
+
+[[test]]
+name = "property"
 
 [[example]]
 name = "sender_custom"
 required-features = ["sms"]
+
+[[example]]
+name = "provider_pipeline"
+required-features = ["social"]

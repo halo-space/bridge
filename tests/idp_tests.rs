@@ -4,8 +4,8 @@ use halo::factor::basic::magic::MagicLinkConfig;
 use halo::factor::oidc;
 use halo::factor::passkey::Passkey;
 use halo::pkg::password::{Algorithm, Password};
-use halo::store::{Clients, Passkeys, Secrets, Users};
-use halo::types::{OAuthClient, User};
+use halo::store::{Clients, Passkeys, Secrets};
+use halo::types::{Identity, OAuthClient, User};
 use halo::validator::issuer::captcha::{
     Image as IssueImage, Rotate as IssueRotate, Slider as IssueSlider,
 };
@@ -18,6 +18,7 @@ use halo::validator::verifier::captcha::{
 };
 use halo::validator::verifier::{Magic as VerifyMagic, Passkey as VerifyPasskey};
 use halo::{factor, token};
+use jsonwebtoken::{Algorithm as JwtAlgorithm, EncodingKey, Header, encode};
 use saml::InMemoryReplayCache;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -50,7 +51,10 @@ fn test_password_hash_and_verify() {
 fn test_oidc_discovery_matches_supported_flow() {
     let discovery = oidc::OidcDiscovery::new("https://idp.example");
     assert_eq!(discovery.response_types_supported, vec!["code"]);
-    assert_eq!(discovery.scopes_supported, vec!["openid"]);
+    assert_eq!(
+        discovery.scopes_supported,
+        vec!["openid", "profile", "email"]
+    );
     assert_eq!(
         discovery.token_endpoint_auth_methods_supported,
         vec!["client_secret_post", "none"]
@@ -76,6 +80,20 @@ fn test_oidc_values_generate_and_validate() {
     assert!(oidc::Pkce::check(&verifier, &challenge, Some("S256")).is_ok());
     assert!(oidc::Pkce::check("wrong", &challenge, Some("S256")).is_err());
     assert!(oidc::Pkce::check("short", "short", Some("plain")).is_err());
+}
+
+#[tokio::test]
+async fn test_oidc_state_and_nonce_are_single_use() {
+    let kv = MemSecrets::new();
+    let state = oidc::State::new();
+    kv.set("state-key", &state, 60).await.unwrap();
+    oidc::State::take(&kv, "state-key", &state).await.unwrap();
+    assert!(oidc::State::take(&kv, "state-key", &state).await.is_err());
+
+    let nonce = oidc::Nonce::new();
+    kv.set("nonce-key", &nonce, 60).await.unwrap();
+    oidc::Nonce::take(&kv, "nonce-key", &nonce).await.unwrap();
+    assert!(oidc::Nonce::take(&kv, "nonce-key", &nonce).await.is_err());
 }
 
 #[test]
@@ -421,17 +439,116 @@ fn code_storage_key_does_not_expose_target() {
     assert!(key.starts_with("code:login_sms:"));
 }
 
+#[test]
+fn external_oidc_authorize_and_id_token_validation() {
+    use rsa::pkcs8::{EncodePrivateKey, LineEnding};
+
+    let issuer = "https://login.example";
+    let provider = oidc::Provider::new(oidc::Config {
+        issuer: issuer.into(),
+        client_id: "client".into(),
+        client_secret: "secret".into(),
+        scope: Some("openid email".into()),
+        authorization_endpoint: Some("https://login.example/oauth2/authorize".into()),
+        token_endpoint: None,
+        discovery_endpoint: None,
+        jwks_endpoint: None,
+    });
+    let (_, challenge) = oidc::Pkce::new();
+    let url = provider
+        .authorize_url(
+            "state-1",
+            "https://app.example/callback",
+            Some("nonce-1"),
+            Some(&challenge),
+            Some("S256"),
+        )
+        .unwrap();
+    assert!(url.contains("response_type=code"));
+    assert!(url.contains("state=state-1"));
+    assert!(url.contains("nonce=nonce-1"));
+
+    let mut rng = rand_core::OsRng;
+    let private = rsa::RsaPrivateKey::new(&mut rng, 2048).unwrap();
+    let private_pem = private.to_pkcs8_pem(LineEnding::LF).unwrap();
+    let public = rsa::RsaPublicKey::from(&private);
+    let jwks = token::JwksResponse::from_rsa_public_key(&public, "key-1");
+    let discovery = oidc::Discovery {
+        issuer: issuer.into(),
+        authorization_endpoint: "https://login.example/oauth2/authorize".into(),
+        token_endpoint: "https://login.example/oauth2/token".into(),
+        jwks_uri: "https://login.example/oauth2/jwks".into(),
+        jwks,
+    };
+    let now = chrono::Utc::now().timestamp();
+    let claims = serde_json::json!({
+        "iss": issuer,
+        "sub": "external-7",
+        "aud": "client",
+        "exp": now + 60,
+        "iat": now,
+        "nonce": "nonce-1",
+        "email": "alice@example.com",
+        "name": "Alice"
+    });
+    let mut header = Header::new(JwtAlgorithm::RS256);
+    header.kid = Some("key-1".into());
+    let id_token = encode(
+        &header,
+        &claims,
+        &EncodingKey::from_rsa_pem(private_pem.as_bytes()).unwrap(),
+    )
+    .unwrap();
+    let profile = provider
+        .verify_id(&id_token, &discovery, Some("nonce-1"))
+        .unwrap();
+    assert_eq!(profile.provider, issuer);
+    assert_eq!(profile.subject, "external-7");
+    assert_eq!(profile.email.as_deref(), Some("alice@example.com"));
+    assert!(
+        provider
+            .verify_id(&id_token, &discovery, Some("wrong"))
+            .is_err()
+    );
+    let sign = |value: &serde_json::Value| {
+        encode(
+            &header,
+            value,
+            &EncodingKey::from_rsa_pem(private_pem.as_bytes()).unwrap(),
+        )
+        .unwrap()
+    };
+    let mut wrong_audience = claims.clone();
+    wrong_audience["aud"] = serde_json::json!("other-client");
+    assert!(
+        provider
+            .verify_id(&sign(&wrong_audience), &discovery, Some("nonce-1"))
+            .is_err()
+    );
+    let mut wrong_issuer = claims.clone();
+    wrong_issuer["iss"] = serde_json::json!("https://evil.example");
+    assert!(
+        provider
+            .verify_id(&sign(&wrong_issuer), &discovery, Some("nonce-1"))
+            .is_err()
+    );
+    let mut expired = claims;
+    expired["exp"] = serde_json::json!(now - 1);
+    assert!(
+        provider
+            .verify_id(&sign(&expired), &discovery, Some("nonce-1"))
+            .is_err()
+    );
+}
+
 // 内存模拟 Secrets
+#[derive(Clone)]
 struct MemSecrets {
-    data: Mutex<HashMap<String, String>>,
+    data: Arc<Mutex<HashMap<String, String>>>,
 }
 
 struct MemClients {
     client: OAuthClient,
-}
-
-struct MemUsers {
-    user: User,
 }
 
 struct MemPasskeys {
@@ -441,21 +558,6 @@ struct MemPasskeys {
 impl Clients for MemClients {
     async fn find_client(&self, client_id: &str) -> halo::Result<Option<OAuthClient>> {
         Ok((self.client.client_id == client_id).then(|| self.client.clone()))
-    }
-}
-
-impl Users for MemUsers {
-    async fn find_by_username(&self, _username: &str) -> halo::Result<Option<User>> {
-        Ok(None)
-    }
-    async fn find_by_phone(&self, _phone: &str) -> halo::Result<Option<User>> {
-        Ok(None)
-    }
-    async fn find_by_email(&self, _email: &str) -> halo::Result<Option<User>> {
-        Ok(None)
-    }
-    async fn find_by_id(&self, id: i64) -> halo::Result<Option<User>> {
-        Ok((self.user.id == id).then(|| self.user.clone()))
     }
 }
 
@@ -532,7 +634,7 @@ impl Passkeys for MemPasskeys {
 impl MemSecrets {
     fn new() -> Self {
         Self {
-            data: Mutex::new(HashMap::new()),
+            data: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -566,6 +668,15 @@ impl Secrets for MemSecrets {
     async fn del(&self, key: &str) -> halo::Result<()> {
         self.data.lock().unwrap().remove(key);
         Ok(())
+    }
+
+    async fn claim(&self, key: &str, val: &str, _ttl: u64) -> halo::Result<bool> {
+        let mut data = self.data.lock().unwrap();
+        if data.contains_key(key) {
+            return Ok(false);
+        }
+        data.insert(key.to_string(), val.to_string());
+        Ok(true)
     }
 
     async fn incr(&self, key: &str, _ttl: u64) -> halo::Result<u32> {
@@ -697,6 +808,34 @@ async fn test_captcha_service_flow() {
     };
     assert!(verifier.verify(&kv, &type_mismatch).await.is_err());
 
+    // 同一个挑战并发提交时，Secrets 的原子消费保证最多一个请求成功。
+    let concurrent = issuer
+        .issue(&kv, CaptchaType::Image)
+        .await
+        .expect("generate concurrent challenge failed");
+    let answer = kv
+        .data
+        .lock()
+        .unwrap()
+        .get(&format!("cap:{}", concurrent.id))
+        .cloned()
+        .unwrap();
+    let request = || CaptchaVerifyReq {
+        id: concurrent.id.clone(),
+        captcha_type: CaptchaType::Image,
+        text: Some(answer.clone()),
+        offset_x: None,
+        angle: None,
+        points: None,
+    };
+    let request_left = request();
+    let request_right = request();
+    let (left, right) = tokio::join!(
+        verifier.verify(&kv, &request_left),
+        verifier.verify(&kv, &request_right)
+    );
+    assert_eq!(usize::from(left.is_ok()) + usize::from(right.is_ok()), 1);
+
     // 3. 重新生成并正确核验
     let challenge2 = issuer
         .issue(&kv, CaptchaType::Slider)
@@ -788,6 +927,22 @@ async fn test_oidc_code_keeps_nonce_and_survives_failed_pkce() {
         code_challenge_method: Some("S256".into()),
         nonce: Some("nonce-1".into()),
     };
+    let issued_code = oidc::Flow::issue_code_with_nonce(
+        &kv,
+        "web",
+        Identity::new("local", "subject-key"),
+        &authorize.redirect_uri,
+        "openid",
+        authorize.code_challenge.clone(),
+        authorize.code_challenge_method.clone(),
+        authorize.nonce.clone(),
+        60,
+    )
+    .await
+    .unwrap();
+    let stored_keys = kv.data.lock().unwrap().keys().cloned().collect::<Vec<_>>();
+    assert!(stored_keys.iter().any(|key| key.starts_with("code:")));
+    assert!(stored_keys.iter().all(|key| !key.contains(&issued_code)));
     let mut bad_scope = authorize.clone();
     bad_scope.scope = Some("admin".into());
     assert!(
@@ -820,7 +975,7 @@ async fn test_oidc_code_keeps_nonce_and_survives_failed_pkce() {
     let code = oidc::Flow::issue_code_with_nonce(
         &kv,
         "web",
-        1,
+        Identity::new("local", "1").name("user"),
         &authorize.redirect_uri,
         "openid",
         authorize.code_challenge.clone(),
@@ -873,6 +1028,42 @@ async fn test_oidc_code_keeps_nonce_and_survives_failed_pkce() {
             .await
             .is_err()
     );
+
+    let (verifier2, challenge2) = oidc::Pkce::new();
+    let code2 = oidc::Flow::issue_code_with_nonce(
+        &kv,
+        "web",
+        Identity::new("local", "subject-1").name("Alice"),
+        &authorize.redirect_uri,
+        "openid",
+        Some(challenge2),
+        Some("S256".into()),
+        Some("nonce-2".into()),
+        60,
+    )
+    .await
+    .unwrap();
+    let token = token::Token::new("oidc-secret-32-bytes-long-enough", "halo", 60, 600);
+    let response = oidc::Flow::exchange(
+        &clients,
+        &token,
+        &kv,
+        &oidc::TokenRequest {
+            grant_type: "authorization_code".into(),
+            code: Some(code2),
+            redirect_uri: Some(authorize.redirect_uri.clone()),
+            client_id: "web".into(),
+            client_secret: None,
+            code_verifier: Some(verifier2),
+            refresh_token: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(response.token_type, "Bearer");
+    assert_eq!(response.expires_in, 60);
+    assert_eq!(response.scope.as_deref(), Some("openid"));
+    assert!(response.id_token.is_some());
 }
 
 #[tokio::test]
@@ -891,17 +1082,10 @@ async fn test_oidc_refresh_rotates_and_revokes_old_token() {
         },
     };
     let service = token::Token::new("refresh-secret-32-bytes-long-enough", "halo", 60, 600);
-    let user = User {
-        id: 7,
-        username: "user".into(),
-        email: None,
-        phone: None,
-        password_hash: None,
-        password_algorithm: None,
-        is_active: true,
-    };
-    let users = MemUsers { user: user.clone() };
-    let (_, refresh) = service.issue_tokens(&user, Some("web".into())).unwrap();
+    let identity = Identity::new("local", "user-7").name("user");
+    let (_, refresh) = service
+        .issue_identity(&identity, Some("web".into()), Some("openid".into()))
+        .unwrap();
     let request = oidc::TokenRequest {
         grant_type: "refresh_token".into(),
         code: None,
@@ -912,39 +1096,62 @@ async fn test_oidc_refresh_rotates_and_revokes_old_token() {
         refresh_token: Some(refresh.clone()),
     };
 
-    let (_, next_refresh) =
-        oidc::Flow::exchange_refresh_token(&clients, &users, &service, &kv, &request)
-            .await
-            .unwrap();
+    let response = oidc::Flow::exchange_refresh_token(&clients, &service, &kv, &request)
+        .await
+        .unwrap();
+    let next_refresh = response.refresh_token.clone().unwrap();
+    assert_eq!(response.token_type, "Bearer");
+    assert_eq!(response.expires_in, 60);
+    assert!(response.id_token.is_some());
     assert_ne!(refresh, next_refresh);
     assert!(oidc::Flow::is_token_revoked(&kv, &refresh).await.unwrap());
     let keys = kv.data.lock().unwrap().keys().cloned().collect::<Vec<_>>();
     assert!(keys.iter().all(|key| !key.contains(&refresh)));
     assert!(
-        oidc::Flow::exchange_refresh_token(&clients, &users, &service, &kv, &request)
+        oidc::Flow::exchange_refresh_token(&clients, &service, &kv, &request)
             .await
             .is_err()
     );
+}
 
-    let (_, inactive_refresh) = service.issue_tokens(&user, Some("web".into())).unwrap();
-    let mut inactive = user;
-    inactive.is_active = false;
-    let inactive_users = MemUsers { user: inactive };
-    let inactive_request = oidc::TokenRequest {
-        refresh_token: Some(inactive_refresh),
-        ..request
+#[tokio::test]
+async fn test_oidc_refresh_rotation_allows_one_concurrent_consumer() {
+    let kv = MemSecrets::new();
+    let other = kv.clone();
+    let clients = MemClients {
+        client: OAuthClient {
+            client_id: "web".into(),
+            client_secret: None,
+            client_name: "Web".into(),
+            redirect_uris: vec!["https://app.example/callback".into()],
+            grant_types: vec!["refresh_token".into()],
+            response_types: vec!["code".into()],
+            scope: "openid".into(),
+            is_public: true,
+        },
     };
-    assert!(matches!(
-        oidc::Flow::exchange_refresh_token(
-            &clients,
-            &inactive_users,
-            &service,
-            &kv,
-            &inactive_request,
+    let service = token::Token::new("refresh-race-secret-32-bytes-long", "halo", 60, 600);
+    let (_, refresh) = service
+        .issue_identity(
+            &Identity::new("external", "subject-race"),
+            Some("web".into()),
+            Some("openid".into()),
         )
-        .await,
-        Err(halo::Error::UserDisabled)
-    ));
+        .unwrap();
+    let request = oidc::TokenRequest {
+        grant_type: "refresh_token".into(),
+        code: None,
+        redirect_uri: None,
+        client_id: "web".into(),
+        client_secret: None,
+        code_verifier: None,
+        refresh_token: Some(refresh),
+    };
+    let (left, right) = tokio::join!(
+        oidc::Flow::exchange_refresh_token(&clients, &service, &kv, &request),
+        oidc::Flow::exchange_refresh_token(&clients, &service, &other, &request),
+    );
+    assert_eq!(left.is_ok() as u8 + right.is_ok() as u8, 1);
 }
 
 #[test]
@@ -1018,6 +1225,15 @@ fn test_totp_and_recovery_codes() {
     assert_eq!(code.len(), 6);
     assert!(halo::pkg::totp::Totp::verify_code(&secret, &code, now).unwrap());
     assert!(!halo::pkg::totp::Totp::verify_code(&secret, "000000", now).unwrap());
+    let config = halo::pkg::totp::Config {
+        algorithm: halo::pkg::totp::Algorithm::Sha256,
+        digits: 8,
+        period: 60,
+        window: 0,
+    };
+    let code = halo::pkg::totp::Totp::generate_with(&secret, now, config).unwrap();
+    assert_eq!(code.len(), 8);
+    assert!(halo::pkg::totp::Totp::verify_with(&secret, &code, now, config).unwrap());
 
     // 3. 应急恢复码
     let batch = halo::pkg::recovery::RecoveryCode::generate_batch(5);
@@ -1035,14 +1251,15 @@ fn test_totp_and_recovery_codes() {
     assert!(halo::pkg::recovery::RecoveryCode::verify("INVALID-CODE", &hashes).is_err());
 
     // 4. 用户专属 Salt 强绑定派生测试
-    let user_id = 3000000000000001;
+    let subject = "user-3000000000000001";
     let salt1 = "a1b2c3d4e5f60718293a4b5c6d7e8f90";
     let salt2 = "ffffffffffffffffffffffffffffffff";
 
-    let secret_u1_s1 = halo::pkg::totp::Totp::derive_secret_with_salt(user_id, salt1);
-    let secret_u1_s1_repeat = halo::pkg::totp::Totp::derive_secret_with_salt(user_id, salt1);
-    let secret_u1_s2 = halo::pkg::totp::Totp::derive_secret_with_salt(user_id, salt2);
-    let secret_u2_s1 = halo::pkg::totp::Totp::derive_secret_with_salt(user_id + 1, salt1);
+    let secret_u1_s1 = halo::pkg::totp::Totp::derive_secret_with_salt(subject, salt1);
+    let secret_u1_s1_repeat = halo::pkg::totp::Totp::derive_secret_with_salt(subject, salt1);
+    let secret_u1_s2 = halo::pkg::totp::Totp::derive_secret_with_salt(subject, salt2);
+    let secret_u2_s1 =
+        halo::pkg::totp::Totp::derive_secret_with_salt("user-3000000000000002", salt1);
 
     // 确定性：相同用户 + 相同盐派生出的秘钥严格一致
     assert_eq!(secret_u1_s1, secret_u1_s1_repeat);
@@ -1139,12 +1356,21 @@ async fn test_passkey_fixture_register_request_verify() {
     let mut auth_state: serde_json::Value = serde_json::from_str(&auth.state).unwrap();
     auth_state["state"]["ast"]["challenge"] =
         serde_json::Value::String("vXR-a0od0rVjsq3WptR82x2pCToaG3j2V62p0vGZlr0".into());
+    let auth_state = auth_state.to_string();
+    let state_store = MemSecrets::new();
+    state_store
+        .set("passkey:state", &auth_state, 60)
+        .await
+        .unwrap();
 
     let result = verifier
-        .verify(
+        .verify_once(
+            &state_store,
+            "passkey:state",
             include_str!("fixtures/passkey_auth.json"),
-            &auth_state.to_string(),
+            &auth_state,
         )
+        .await
         .unwrap();
     assert_eq!(
         result.credential_id,
@@ -1157,14 +1383,15 @@ async fn test_passkey_fixture_register_request_verify() {
     assert!(result.needs_update);
     assert!(result.data.is_some());
 
-    let mut replay_state = auth_state.clone();
-    replay_state["state"]["ast"]["challenge"] = serde_json::Value::String("invalid".into());
     assert!(
         verifier
-            .verify(
+            .verify_once(
+                &state_store,
+                "passkey:state",
                 include_str!("fixtures/passkey_auth.json"),
-                &replay_state.to_string(),
+                &auth_state,
             )
+            .await
             .is_err()
     );
 

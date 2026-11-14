@@ -1,6 +1,6 @@
 use super::*;
 
-impl<S, U, F, P, E, D> Services<S, U, F, P, E, D>
+impl<S, U, F, P, E, D, L> Services<S, U, F, P, E, D, L>
 where
     S: Secrets,
     U: Users,
@@ -8,10 +8,12 @@ where
     P: Passkeys,
     E: Events,
     D: Devices,
+    L: Limits,
 {
     pub(super) async fn issue(&self, node: &Node, context: &Context, kind: &str) -> Result<Output> {
+        let input = node_data(context, node).unwrap_or(&Value::Null);
         if kind == "device" {
-            let data = node_data(context, node)?;
+            let data = input;
             let device_id = string(data, "device_id")?;
             let device = self
                 .devices
@@ -26,6 +28,7 @@ where
             })));
         }
         if kind == "captcha" || kind.starts_with("captcha.") {
+            self.allow(node, context, input).await?;
             let captcha_type = captcha_type(kind)?;
             let challenge = self
                 .captcha_issue
@@ -39,6 +42,7 @@ where
 
         let channel = channel(kind)?;
         let target = target(context, node, channel)?;
+        self.allow(node, context, input).await?;
         let scene = node
             .args
             .get("scene")

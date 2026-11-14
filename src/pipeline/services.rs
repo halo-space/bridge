@@ -4,7 +4,10 @@ use crate::error::{Error, Result};
 use crate::factor::basic::code::{Email as EmailCode, Sms as SmsCode, Totp as TotpCode};
 use crate::factor::basic::password::{Account, Email as EmailPassword, Phone as PhonePassword};
 use crate::factor::enterprise::DeviceProof;
-use crate::store::{Devices, Events, Factors, Passkeys, Secrets, Users};
+use crate::risk::RiskEngine;
+use crate::store::{
+    Decision, Devices, Events, Factors, Limits, Noop, Passkeys, Rule, Secrets, Users,
+};
 use crate::types::User;
 use crate::validator::issuer::{Captcha as CaptchaIssue, Code, Passkey as PasskeyIssue};
 use crate::validator::sender::{Notify, NotifyChannel};
@@ -13,7 +16,9 @@ use crate::validator::verifier::captcha::{
     Captcha as CaptchaVerify, CaptchaType, CaptchaVerifyReq,
 };
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
+use std::future::Future;
 
 mod audit;
 mod check;
@@ -52,7 +57,11 @@ impl Table {
         let mut table = Self {
             values: BTreeMap::new(),
         };
-        table.add(Slot::Check, &["identity", "present"], Handler::Check);
+        table.add(
+            Slot::Check,
+            &["identity", "present", "risk", "risk.score"],
+            Handler::Check,
+        );
         table.add(
             Slot::Issue,
             &[
@@ -99,19 +108,12 @@ impl Table {
             &[
                 "audit",
                 "auth.success",
-                "auth_success",
                 "auth.failed",
-                "auth_failed",
                 "mfa.challenge",
-                "mfa_challenged",
                 "mfa.passed",
-                "mfa_passed",
                 "mfa.failed",
-                "mfa_failed",
                 "passkey.success",
-                "passkey_auth_success",
                 "passkey.failed",
-                "passkey_auth_failed",
             ],
             Handler::Audit,
         );
@@ -153,13 +155,15 @@ impl Table {
 ///
 /// Pipeline 负责图和状态，`Services` 负责把节点绑定到已有的 issuer、sender、
 /// verifier、factor 和 store。调用方只提供依赖，不需要自己按节点分派认证逻辑。
-pub struct Services<S, U, F, P, E, D> {
+pub struct Services<S, U, F, P, E, D, L = Noop> {
     pub secrets: S,
     pub users: U,
     pub factors: F,
     pub passkeys: P,
     pub events: E,
     pub devices: D,
+    pub limits: L,
+    pub risk: Option<RiskEngine>,
     pub notify: Notify,
     pub captcha_issue: CaptchaIssue,
     pub captcha_verify: CaptchaVerify,
@@ -170,7 +174,7 @@ pub struct Services<S, U, F, P, E, D> {
     table: Table,
 }
 
-impl<S, U, F, P, E, D> Services<S, U, F, P, E, D> {
+impl<S, U, F, P, E, D> Services<S, U, F, P, E, D, Noop> {
     pub fn new(
         secrets: S,
         users: U,
@@ -187,6 +191,8 @@ impl<S, U, F, P, E, D> Services<S, U, F, P, E, D> {
             passkeys,
             events,
             devices,
+            limits: Noop,
+            risk: None,
             notify,
             captcha_issue: CaptchaIssue::default(),
             captcha_verify: CaptchaVerify::default(),
@@ -197,9 +203,39 @@ impl<S, U, F, P, E, D> Services<S, U, F, P, E, D> {
             table: Table::builtins(),
         }
     }
+}
+
+impl<S, U, F, P, E, D, L> Services<S, U, F, P, E, D, L> {
+    /// 使用调用方提供的频控和锁定存储。
+    pub fn limits<M: Limits>(self, limits: M) -> Services<S, U, F, P, E, D, M> {
+        Services {
+            secrets: self.secrets,
+            users: self.users,
+            factors: self.factors,
+            passkeys: self.passkeys,
+            events: self.events,
+            devices: self.devices,
+            limits,
+            risk: self.risk,
+            notify: self.notify,
+            captcha_issue: self.captcha_issue,
+            captcha_verify: self.captcha_verify,
+            passkey_issue: self.passkey_issue,
+            passkey_verify: self.passkey_verify,
+            code_ttl: self.code_ttl,
+            code_digits: self.code_digits,
+            table: self.table,
+        }
+    }
 
     pub fn captcha_verify(mut self, captcha: CaptchaVerify) -> Self {
         self.captcha_verify = captcha;
+        self
+    }
+
+    /// 注入可选风险引擎；未注入时，`check(risk)` 会返回不支持。
+    pub fn risk(mut self, engine: RiskEngine) -> Self {
+        self.risk = Some(engine);
         self
     }
 
@@ -224,9 +260,64 @@ impl<S, U, F, P, E, D> Services<S, U, F, P, E, D> {
         self.captcha_verify = self.captcha_verify.ttl(self.code_ttl);
         self
     }
+
+    pub(super) fn rule(&self, node: &Node) -> Option<Rule> {
+        let args = node.args.as_object()?;
+        let limit = args.get("limit").and_then(Value::as_u64)? as u32;
+        let window = args.get("window").and_then(Value::as_u64)?;
+        if limit == 0 || window == 0 {
+            return None;
+        }
+        Some(
+            Rule::new(limit, window)
+                .lock(args.get("lock").and_then(Value::as_u64).unwrap_or_default()),
+        )
+    }
+
+    pub(super) async fn allow(
+        &self,
+        node: &Node,
+        context: &Context,
+        data: &Value,
+    ) -> Result<Option<(String, Rule)>>
+    where
+        L: Limits,
+    {
+        let Some(rule) = self.rule(node) else {
+            return Ok(None);
+        };
+        let key = limit_key(node, context, data);
+        if !self.limits.allow(&key, rule.limit, rule.window).await? {
+            return Err(Error::AuthFailed("Rate limit exceeded".into()));
+        }
+        Ok(Some((key, rule)))
+    }
+
+    pub(super) async fn finish<T, Fut>(&self, guard: Option<(String, Rule)>, task: Fut) -> Result<T>
+    where
+        L: Limits,
+        Fut: Future<Output = Result<T>>,
+    {
+        let result = task.await;
+        let Some((key, rule)) = guard else {
+            return result;
+        };
+        match result {
+            Ok(value) => {
+                self.limits.clear(&key).await?;
+                Ok(value)
+            }
+            Err(error) => match self.limits.fail(&key, rule).await? {
+                Decision::Allow => Err(error),
+                Decision::Deny { retry_after } => Err(Error::AuthFailed(format!(
+                    "Authentication is locked; retry after {retry_after} seconds"
+                ))),
+            },
+        }
+    }
 }
 
-impl<S, U, F, P, E, D> Runner for Services<S, U, F, P, E, D>
+impl<S, U, F, P, E, D, L> Runner for Services<S, U, F, P, E, D, L>
 where
     S: Secrets,
     U: Users,
@@ -234,6 +325,7 @@ where
     P: Passkeys,
     E: Events,
     D: Devices,
+    L: Limits,
 {
     fn supports(&self, node: &Node) -> bool {
         match &node.kind {
@@ -242,6 +334,7 @@ where
                 .table
                 .get(&node.kind)
                 .is_some_and(|handler| match handler {
+                    Handler::Check => !is_risk(&node.kind) || self.risk.is_some(),
                     Handler::Issue => !is_passkey(&node.kind) || self.passkey_issue.is_some(),
                     Handler::Verify => !is_passkey(&node.kind) || self.passkey_verify.is_some(),
                     _ => true,
@@ -277,7 +370,7 @@ fn pass(data: Value) -> Output {
 fn identity_pass(user: User) -> Output {
     Output::Pass {
         routes: Vec::new(),
-        data: json!({ "authenticated": true, "user_id": user.id }),
+        data: json!({ "authenticated": true, "subject": user.id.to_string() }),
         identity: Some(user.identity()),
         at: chrono::Utc::now().timestamp(),
     }
@@ -300,6 +393,10 @@ fn is_passkey(kind: &Kind) -> bool {
         kind,
         Kind::Issue(code) | Kind::Verify(code) if matches!(code.as_str(), "passkey" | "webauthn")
     )
+}
+
+fn is_risk(kind: &Kind) -> bool {
+    matches!(kind, Kind::Check(code) if matches!(code.as_str(), "risk" | "risk.score"))
 }
 
 fn captcha_type(kind: &str) -> Result<CaptchaType> {
@@ -345,4 +442,23 @@ fn target(context: &Context, node: &Node, channel: &str) -> Result<String> {
         return Ok(target.to_string());
     }
     Err(Error::AuthFailed(format!("Missing field: {key}")))
+}
+
+fn limit_key(node: &Node, context: &Context, data: &Value) -> String {
+    let subject = ["account", "email", "phone", "subject", "id"]
+        .iter()
+        .find_map(|field| data.get(*field).and_then(Value::as_str))
+        .or_else(|| {
+            context
+                .identity
+                .as_ref()
+                .map(|identity| identity.subject.as_str())
+        })
+        .unwrap_or("anonymous");
+    let digest = Sha256::digest(subject.as_bytes());
+    let subject = digest
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    format!("pipeline:{}:{subject}", node.id)
 }

@@ -10,6 +10,7 @@ pub use config::{
 pub use engine::Pipeline;
 pub use model::{
     Claim, Context, Edge, Effects, Event, Evidence, Fallback, Join, Kind, Node, Output, Runner,
+    Sensitive,
 };
 pub use run::{Effect, Progress, Run};
 #[cfg(feature = "full")]

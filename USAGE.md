@@ -27,7 +27,7 @@ use halo::bridge::*;
 halo = { package = "halo-bridge", version = "0.4", default-features = false }
 ```
 
-可选 feature 是 `mail`、`sms`、`social`、`enterprise` 和 `passkey`，`full` 会一次启用全部能力。
+可选 feature 是 `mail`、`sms`、`social`、`enterprise`、`passkey` 和 `oidc`，`full` 会一次启用全部能力。`oidc` 只增加外部 OIDC Provider 的 HTTP 交换和 Discovery/JWKS 读取；服务端授权码、TokenResponse 和 PKCE 核心不依赖这个 feature。
 
 关闭默认 feature 后，未启用的模块不会参与编译；例如没有 `sms` feature 时，短信 sender 类型不可用。
 
@@ -109,8 +109,10 @@ pub trait Factors {}  // TOTP 绑定
 pub trait Passkeys {} // Passkey 保存和计数器条件更新
 pub trait Devices {}  // Device 保存、更新和撤销
 pub trait Events {}   // 审计事件写入
-pub trait Limits {}   // 发送和校验频控
+pub trait Limits {}   // 发送、校验频控和失败锁定
 ```
+
+`State::new` 和 `Nonce::new` 只生成随机值；跨请求保存和单次消费由调用方负责。把值原样写入 `Secrets` 后，回调时使用 `State::take` 或 `Nonce::take`，它们通过 `Secrets::take_if` 原子消费，重复回调会失败。
 
 例如，账号密码节点会调用 `Users`，短信验证码节点会调用 `Secrets`，TOTP 节点会调用 `Factors`，审计节点会调用 `Events`。这些接口只定义 bridge 需要什么数据，不规定调用方如何建表或如何使用 Redis。
 
@@ -121,7 +123,25 @@ pub trait Limits {}   // 发送和校验频控
 - 用户是否存在、是否启用、是否被锁定。
 - Passkey 计数器条件更新和 Device 一次性编号的单次消费。
 
-验证码失败次数必须通过 `Secrets::incr` 原子递增。存储不支持该操作时，验证码校验会返回错误，调用方应接入 Redis、数据库原子计数或自己的等价实现。
+### 1.1 注入频控和锁定
+
+`Services` 默认使用 `Noop`，不会自行限制请求。需要限制时，实现 `Limits`，再通过 `.limits(store)` 注入。Pipeline 节点的 `args` 同时包含 `limit` 和 `window` 时才启用频控：
+
+```rust
+let services = Services::new(secrets, users, factors, passkeys, events, devices, notify)
+    // store 由调用方实现，可以落到 Redis、数据库或其他原子计数服务。
+    .limits(app_limits);
+
+let sms = Node::issue("sms", "sms")
+    // 60 秒内最多签发 5 次；失败锁定策略由 Limits::fail 决定。
+    .args(serde_json::json!({ "limit": 5, "window": 60, "lock": 900 }));
+```
+
+`allow` 在签发或校验前调用。校验成功后调用 `clear` 清理连续失败记录；校验失败调用 `fail`，调用方可以递增失败次数并返回 `Decision::Deny { retry_after }`。bridge 只传递规则和结果，不保存计数、不创建锁定记录，也不添加租户字段。建议调用方把节点 ID、应用 ID、平台 ID 和租户 ID 加入自己的存储 key。
+
+验证码失败次数必须通过 `Secrets::incr` 原子递增。刷新令牌轮换必须通过 `Secrets::claim` 原子占用旧令牌摘要；同一个旧令牌只有第一个并发请求可以成功。存储不支持这些原子操作时，相关校验会返回错误，调用方应接入 Redis、数据库原子命令或自己的等价实现。
+
+审计事件使用 `Identity` 记录主体，不要求 `user_id` 或整数主键。账号密码等基础能力可以继续通过调用方的 `Users` 读取本地账号资料，但成功后统一输出 `Identity`；业务账号绑定、用户表和主体映射仍由调用方处理。
 
 ### 第二步：创建 Cards
 
@@ -382,9 +402,10 @@ let progress = pipeline.run(&mut run, &runner).await?;
 
 ### 第七步：保存和恢复 Run
 
-如果登录需要跨 HTTP 请求继续，调用方保存序列化后的 Run：
+如果登录需要跨 HTTP 请求继续，调用方保存序列化后的 Run，并设置自己的短期 TTL：
 
 ```rust
+let run = run.expires_at(chrono::Utc::now().timestamp() + 300);
 let encoded = serde_json::to_vec(&run)?;
 // 写入调用方自己的 Redis 或数据库，并设置短 TTL。
 ```
@@ -394,15 +415,19 @@ let encoded = serde_json::to_vec(&run)?;
 恢复时必须加载同一版本的 Pipeline：
 
 ```rust
-// 从持久化数据恢复上一次登录运行状态。
-let mut run: Run = serde_json::from_slice(&encoded)?;
+// 只从调用方自己的可信短期存储读取，不接受浏览器直接提交的 Run JSON。
+let mut run = pipeline.restore(&encoded, chrono::Utc::now().timestamp())?;
 // 使用发布时的同一份 Pipeline 继续执行。
 let progress = pipeline.run(&mut run, &runner).await?;
 ```
 
-恢复时使用发布 Run 时的同一份 Pipeline；如果配置版本或 hash 不一致，bridge 会拒绝继续，避免新配置误接管旧认证流程。
+`Pipeline::restore` 会检查配置版本、hash、当前节点、就绪节点、步数和 `expires_at`。如果配置版本或 hash 不一致、状态过期或包含未知节点，bridge 会拒绝继续，避免新配置误接管旧认证流程。
+
+`Context`、节点输入、Evidence 和 Run 中的 JSON 值有统一大小、深度、字段数和数组长度上限；超出限制的请求会在启动、提交输入或序列化时被拒绝。Provider 的原始响应也应由调用方在 HTTP 层限制响应体大小后再交给 Runner。
 
 Run 会拒绝持久化密码、验证码、Token、state、nonce 等敏感字段。调用方仍应在存储层设置认证流程 TTL，并在登录结束、失败或取消时删除 Run。
+
+`AuditEvent::with_metadata` 会在写入前递归删除密码、验证码、Token、Secret、state、nonce、credential 等敏感字段；业务 metadata 仍应控制大小，避免把完整 Provider 原始响应写入审计记录。
 
 如果流程需要跨请求暂停，调用方先把当前节点展示给用户所需的 `challenge`、Passkey `options` 或 `state` 保存到自己的短期存储，然后调用 `run.clear()` 清理 Run 中的临时材料，再保存 Run。下一次提交输入时，把短期存储中的 `state` 或验证码材料放回 `Event::Input`，bridge 不替调用方保存这些内容。
 
@@ -464,6 +489,8 @@ let pipeline = Pipeline::new(
 这三个节点分别表示：第一个节点收集账号和密码；第二个节点使用 `password` 能力校验；第三个节点写入审计。`.edge(None, "password")` 表示成功后沿默认边进入 `password` 节点。
 
 默认 `Services` 会从调用方的 `Users` Store 查询账号并校验密码。账号表、密码哈希和密码算法由调用方保存；自定义密码算法可以实现自己的 Runner 或注入 `Codecs`。如果没有 `Users` Store，或者使用自己的账号系统，就用自定义 Runner 替换这个 `verify(password)` 节点。
+
+内置密码算法中，Argon2id 和 Bcrypt 适合新密码；PBKDF2 和 SM3 使用带盐的固定格式，校验会拒绝超出允许范围的迭代次数，并使用常量时间比较。SM3 这里是 PBKDF2-HMAC-SM3，不是一次普通 SM3 摘要。调用方如果有国密或其他 KDF 要求，实现 `Codec` 后注册到 `Codecs`，不要把原始密码或私钥写入 Pipeline 配置。
 
 ### 5.2 手机号、滑块、短信验证码
 
@@ -548,6 +575,8 @@ let pipeline = Pipeline::new(
 
 TOTP Secret 不由 bridge 保存。`Factors` Store 根据调用方身份返回绑定信息，调用方负责 Secret 加密、轮换和解绑。
 
+TOTP 默认使用 SHA-1、6 位、30 秒周期和前后各一个时间步长的容错。需要其他标准参数时，调用方使用 `pkg::totp::Config` 配置 SHA-256/SHA-512、位数、周期和窗口；Secret 仍由调用方绑定和保存。
+
 ```rust
 let pipeline = Pipeline::new(
     // 先从账号密码开始。
@@ -591,10 +620,10 @@ Passkey 通常分成签发注册/认证选项和校验浏览器返回值：
 1. 先完成用户身份确认。
 2. 通过 `issue(webauthn)` 获取浏览器选项和 state。
 3. 把 state 短期保存到 `Secrets`。
-4. 接收浏览器 Passkey 响应后提交给 `verify(passkey)`。
+4. 接收浏览器 Passkey 响应后提交给 `verify_once(passkey)`，让 bridge 用 `Secrets::take_if` 原子消费状态。
 5. 通过 `Passkeys::update` 做计数器条件更新。
 
-因此，`issue(webauthn)` 的结果需要返回给浏览器，浏览器返回的 credential 再由调用方提交给 `input(credential)`；这两个请求之间的 state 由调用方短期保存。
+因此，`issue(webauthn)` 的结果需要返回给浏览器，浏览器返回的 credential 再由调用方提交给 `input(credential)`；这两个请求之间的 state 由调用方短期保存。直接使用 `verify` 或 `register` 时，调用方必须自己完成同样的单次消费；更安全的入口是 `verify_once` 和 `register_once`。
 
 bridge 不保存浏览器 Session，也不决定一个用户是否必须启用 Passkey。
 
@@ -648,6 +677,23 @@ Ok(Output::Pass {
 
 Pipeline 不解析脚本表达式；风险判断由调用方 Runner 或风险模块完成。
 
+一个事件返回多个 `routes` 时，Pipeline 会把这些分支加入同一个 `Run` 的就绪队列，并按队列顺序逐个交给 Runner 执行；它不会在内部并发调用 Runner。调用方如果要并发处理互不相关的登录运行，应在自己的 runtime 中并发执行多个 `Run`，单个 `Run` 的状态更新仍需串行保存。
+
+如果希望使用 bridge 内置的风险评分，可以把 `RiskEngine` 注入 `Services`，并使用 `check("risk")` 节点：
+
+```rust
+let services = Services::new(secrets, users, factors, passkeys, events, devices, notify)
+    .risk(RiskEngine::new(RiskConfig::default()));
+
+// input 节点提交 { "context": RiskContext, "history": UserHistory }。
+let risk = Node::check("risk", "risk")
+    .edge(Some("allow"), "normal")
+    .edge(Some("mfa"), "totp")
+    .edge(Some("block"), "blocked");
+```
+
+风险节点只读取调用方提交的当前请求和历史摘要，返回 `allow`、`mfa` 或 `block` 路由以及 `RiskAssessment`。它不查询用户、不保存历史、不创建锁定记录；历史数据和后续 TOTP、验证码或拒绝处理仍由调用方配置。
+
 ### 5.6 All 和 Any
 
 `Join::All` 要求所有激活分支完成。它表示“每一条被激活的认证路径都必须成功”：
@@ -687,6 +733,8 @@ Node::verify("captcha", "captcha.slider")
 `retries(2)` 是交给 Runner 的失败重试次数；`limit(3)` 是节点在整个图运行期间允许被激活的次数。两者用途不同，循环节点不能只设置 retries。
 
 Pipeline 默认最多执行 128 步。存在回边但没有 `limit` 的图会在发布时被拒绝，避免配置错误造成无限执行。
+
+Pipeline 的基础模型是有向图：没有回边时就是 DAG；需要重试或循环时可以配置带 `limit` 的回边。也就是说，bridge 不把所有流程强行限制成严格 DAG，但任何回边都必须有节点次数上限和全局步数上限。
 
 ## 6. 自定义 Runner
 
@@ -772,9 +820,13 @@ let sender = SmsSender::with(
 
 `Sender::send` 只关心目标手机号、验证码和有效期；供应商鉴权、请求签名和 HTTP 调用都封装在调用方实现里。`SmsSender::with` 把这个供应商接入统一短信门面，Pipeline 不需要知道供应商名称。
 
+邮件也使用同样的替换边界。实现 `validator::sender::mail::Sender`，再通过 `SmtpSender::with` 注入；接口接收目标地址、主题、HTML 和纯文本，调用方可以接入自己的邮件 API、队列或内网服务，不需要改动 `Notify` 和 Pipeline。
+
 腾讯云短信使用 API 3.0 `SendSms` 和 TC3-HMAC-SHA256。生产配置填写 `sdk_app_id`、`sign_name`、`template_code`、`access_key_id`、`access_key_secret` 和可选 `region`。开发环境可以注入 Mock `Sender`，生产环境建议启用严格发送失败策略。
 
 社交和企业 Provider 默认使用 15 秒连接与请求超时。GitHub 可以通过 `auth` 和 `api` 替换授权与 API 地址，Google 可以通过 `auth` 和 `userinfo` 替换授权与用户资料地址；测试环境可以通过 `timeout` 和这些端点替换默认值。
+
+Provider 的网络连接失败、请求超时和 HTTP 5xx 会返回 `Error::Transient`，Pipeline 可以按节点 `retries` 重试；授权码无效、字段缺失、签名不匹配和其他业务拒绝返回 `Error::OAuthError`，不会被自动重试。Provider 会校验必要的 access token、subject、openid、用户资料字段和 OIDC Discovery/JWKS 字段，响应格式错误直接失败。
 
 Provider 模块负责协议链路：生成授权地址、使用 code 换 token、读取第三方资料并转换成标准 Profile。它们不会自动注册到默认 `Services`，也不会自动绑定本地用户。要把微信、GitHub、Google、飞书、企业微信或钉钉放进 Pipeline，调用方需要实现一个 Runner：
 
@@ -784,7 +836,48 @@ Provider 模块负责协议链路：生成授权地址、使用 code 换 token�
 4. 把 Provider 返回的 Profile 转成 `Identity`，或由调用方完成自己的账号绑定。
 5. 返回 `Output::Pass`，让 Pipeline 继续后续审计、TOTP 或应用结果节点。
 
+外部 OIDC Provider 的最小用法如下：
+
+```rust
+use halo::factor::oidc::{Config, Provider};
+
+let provider = Provider::new(Config {
+    issuer: "https://login.example".into(),
+    client_id: "bridge-client".into(),
+    client_secret: "secret".into(),
+    scope: Some("openid profile email".into()),
+    authorization_endpoint: None,
+    token_endpoint: None,
+    discovery_endpoint: None,
+    jwks_endpoint: None,
+});
+
+// state、nonce 和 PKCE verifier 必须由调用方短期保存，并在回调时单次消费。
+let login_url = provider.authorize_url(
+    "state-from-your-store",
+    "https://app.example/oidc/callback",
+    Some("nonce-from-your-store"),
+    Some("pkce-code-challenge"),
+    Some("S256"),
+)?;
+
+// 回调时会读取 Discovery/JWKS、兑换 code，并校验 issuer、audience、过期时间和 nonce。
+let profile = provider
+    .exchange_code_for_profile(
+        "code-from-callback",
+        "https://app.example/oidc/callback",
+        Some("pkce-code-verifier"),
+        Some("nonce-from-your-store"),
+    )
+    .await?;
+let identity = profile.identity();
+```
+
+这段代码不会创建本地用户，也不会保存第三方 access token。`profile.identity()` 只返回 `Identity { provider, subject, ... }`；调用方决定是否绑定已有账号、创建业务账号、要求二次验证或建立 Session。Provider 只接受 RS256 且要求 Discovery 返回的 `issuer`、`kid`、`audience`、有效期和 nonce 全部匹配。
+
 因此，“Provider 能换到第三方身份”和“业务登录流程允许这个身份源”是两个步骤；后者由调用方 Runner 和 PipelineConfig 决定。
+
+仓库中的 `examples/provider_pipeline.rs` 展示了 GitHub Profile 进入 Pipeline 后继续执行的最小 Runner。`tests/provider_pipeline.rs` 还覆盖了 state 校验、后续因子和身份不一致拒绝。
 
 一个 GitHub 登录节点的完整数据流可以这样理解：
 
@@ -886,9 +979,11 @@ Node::effect("audit", "audit")
 
 `once(true)` 让同一个 Run 不重复执行该副作用，`idempotency` 则提供跨进程幂等 Key。审计、短信发送、邮件发送等有外部影响的节点应考虑这两个字段。
 
-跨进程运行时，实现 `Effects`，并让 `begin` 在自己的存储中原子占用 Key。返回 `New` 表示当前进程拿到执行租约，返回 `Busy` 表示其他进程仍在执行，返回 `Done` 表示已经有完成结果。执行租约必须带过期时间，进程崩溃后才能重新接管；`complete` 和 `cancel` 只能由存储实现确认当前租约。Pipeline 不绑定 Redis、数据库或具体 async runtime。
+跨进程运行时，实现 `Effects`，并让 `begin(key, timeout)` 在自己的存储中原子占用 Key。返回 `New { lease }` 表示当前进程拿到执行租约，返回 `Busy` 表示其他进程仍在执行，返回 `Done` 表示已经有完成结果。存储必须把 `timeout` 写入租约过期时间，进程崩溃后才能重新接管；`complete(key, lease, effect)` 和 `cancel(key, lease)` 只能由持有相同 lease 的执行者成功。Pipeline 不绑定 Redis、数据库或具体 async runtime。
 
-节点的 `timeout` 会在 Runner 返回后检查已用时间。要中断一个一直不返回的异步任务，调用方仍需在自己的 runtime 中包裹 Runner；bridge 不持有 runtime，也不会替调用方取消任务。`retries` 只对 Runner 返回的可重试存储、网络和通知错误计数，超过次数后流程进入 `Deny`。
+节点的 `timeout` 会作为副作用租约时长，并在 Runner 返回后检查已用时间。要中断一个一直不返回的异步任务，调用方仍需在自己的 runtime 中包裹 Runner；bridge 不持有 runtime，也不会替调用方取消任务。没有配置节点 `timeout` 时，副作用租约默认 60 秒。`retries` 只对 Runner 返回的可重试存储、网络和通知错误计数，超过次数后流程进入 `Deny`。
+
+一个 `Effects` 存储至少要保证：同一个 key 只能有一个有效 lease；过期 lease 可以被新执行接管；旧 lease 不能提交 `complete` 或 `cancel`；完成结果在后续重复执行时返回 `Done`。这套规则由调用方在 Redis、数据库或其他原子存储中实现。
 
 ## 9. Device 和 Passkey
 
@@ -969,6 +1064,8 @@ cargo test --workspace --all-targets
 cargo clippy --all-targets --all-features -- -D warnings
 # 执行 Pipeline 基准。
 cargo bench --bench pipeline
+# 执行密码、TOTP、Token、Provider 和 Sender 基准。
+cargo bench --bench security
 ```
 
 - `fmt`：检查 Rust 格式。
@@ -978,3 +1075,15 @@ cargo bench --bench pipeline
 - `bench`：测量 Pipeline 状态推进性能，不代表外部短信、数据库或网络耗时。
 
 `bridge` 不管理 HTTP 路由、Session、RBAC、业务用户、租户关系、组织目录和 OIDC UserInfo 端点；这些由应用层组合。
+
+## 13. 注册、取消和数据边界
+
+`Cards::add`、`Cards::arg` 和 `Cards::version` 是公开的能力注册接口。应用启动时把内置能力和自己的 `custom.*` 能力加入 `Cards`，发布配置时调用 `compile_with`；未知能力、未知参数、类型不匹配或版本不一致都会被拒绝。`Cards` 只描述允许配置什么，不执行节点。
+
+`Services` 只绑定固定内置能力码。调用方扩展或替换单个能力时实现自己的 `Runner`，再使用 `Fallback::new(custom, services)` 组合，不需要复制整个 `Services`。自定义 Runner 返回 `Error::Unsupported` 时才会回退；业务拒绝和临时错误会原样返回。每次登录只加载已经发布的 Pipeline，能力表在应用启动时建立。
+
+节点 `timeout` 是 bridge 对节点结果的超时判定。调用方可以使用 `Pipeline::execute_until` 传入自己的 `deadline` 和取消信号；方法只在节点开始前和结束后检查边界，真正的网络请求中断由调用方运行时取消外层 future。带 `once` 或 `idempotency` 的副作用节点使用 `Effects` 租约，调用方存储负责原子占用、完成、取消和过期接管。
+
+`Context`、节点输入、Evidence 和可恢复 `Run` 有 JSON 大小、深度、字段数和字符串长度限制；Provider JSON 使用 `pkg::http::json` 限制响应体大小。对有明确类型边界的 API，使用 `Sensitive<T>` 标记密码、验证码、Token 和 Secret；JSON 状态仍会执行字段清理，作为最后一道保护。持久化 Run 前调用 `Run::clear`，并由调用方存储设置 TTL。
+
+风险节点统一读取 `RiskContext` 和 `UserHistory`，输出 `allow`、`mfa` 或 `block` 路由；调用方可以把 `mfa` 接到 TOTP、Passkey 或短信节点。频控和锁定统一使用 `limit`、`window`、`lock` 与 `Limits` trait；验证成功清除失败计数，失败交给 `Limits::fail` 决定是否锁定。重认证由 `rules::Reauth` 表达，身份、租户和策略存储仍由调用方负责。

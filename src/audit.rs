@@ -1,3 +1,4 @@
+use crate::types::Identity;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -59,10 +60,8 @@ pub struct AuditEvent {
     pub request_id: Option<String>,
     /// 事件类型
     pub event_type: AuditEventType,
-    /// 关联用户 ID (若已知)
-    pub user_id: Option<i64>,
-    /// 关联用户名 / 账号
-    pub username: Option<String>,
+    /// 关联的外部身份主体（若已知）。
+    pub identity: Option<Identity>,
     /// 来源客户端 IP
     pub client_ip: String,
     /// 来源客户端 User-Agent
@@ -89,8 +88,7 @@ impl AuditEvent {
             trace_id: None,
             request_id: None,
             event_type,
-            user_id: None,
-            username: None,
+            identity: None,
             client_ip: client_ip.into(),
             user_agent: None,
             outcome,
@@ -100,9 +98,8 @@ impl AuditEvent {
         }
     }
 
-    pub fn with_user(mut self, user_id: i64, username: impl Into<String>) -> Self {
-        self.user_id = Some(user_id);
-        self.username = Some(username.into());
+    pub fn with_identity(mut self, identity: Identity) -> Self {
+        self.identity = Some(identity);
         self
     }
 
@@ -127,9 +124,48 @@ impl AuditEvent {
     }
 
     pub fn with_metadata(mut self, meta: serde_json::Value) -> Self {
-        self.metadata = meta;
+        self.metadata = clean(meta);
         self
     }
+}
+
+fn clean(value: serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Object(mut object) => {
+            object.retain(|key, _| !sensitive(key));
+            for value in object.values_mut() {
+                let current = std::mem::replace(value, serde_json::Value::Null);
+                *value = clean(current);
+            }
+            serde_json::Value::Object(object)
+        }
+        serde_json::Value::Array(values) => {
+            serde_json::Value::Array(values.into_iter().map(clean).collect())
+        }
+        value => value,
+    }
+}
+
+fn sensitive(key: &str) -> bool {
+    matches!(
+        key.to_ascii_lowercase().as_str(),
+        "password"
+            | "passwd"
+            | "passcode"
+            | "code"
+            | "totp"
+            | "token"
+            | "access_token"
+            | "refresh_token"
+            | "secret"
+            | "state"
+            | "nonce"
+            | "answer"
+            | "credential"
+            | "signature"
+            | "proof"
+            | "client_secret"
+    )
 }
 
 #[cfg(test)]
@@ -143,18 +179,31 @@ mod tests {
             "127.0.0.1",
             AuditOutcome::Success,
         )
-        .with_user(1001, "admin")
+        .with_identity(Identity::new("local", "admin-1").name("admin"))
         .with_user_agent("Mozilla/5.0")
         .with_trace("trace-1")
         .with_request("request-1")
-        .with_metadata(serde_json::json!({ "auth_method": "webauthn" }));
+        .with_metadata(serde_json::json!({
+            "auth_method": "webauthn",
+            "password": "must-not-be-stored",
+            "nested": { "access_token": "also-hidden", "risk": "new_device" }
+        }));
 
         assert_eq!(event.event_type, AuditEventType::AuthSuccess);
         assert_eq!(event.outcome, AuditOutcome::Success);
-        assert_eq!(event.username.as_deref(), Some("admin"));
+        assert_eq!(
+            event
+                .identity
+                .as_ref()
+                .and_then(|value| value.name.as_deref()),
+            Some("admin")
+        );
         assert_eq!(event.client_ip, "127.0.0.1");
         assert_eq!(event.trace_id.as_deref(), Some("trace-1"));
         assert_eq!(event.request_id.as_deref(), Some("request-1"));
         assert!(event.timestamp > 0);
+        assert_eq!(event.metadata["auth_method"], "webauthn");
+        assert!(event.metadata.get("password").is_none());
+        assert!(event.metadata["nested"].get("access_token").is_none());
     }
 }

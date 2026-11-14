@@ -1,6 +1,7 @@
 pub use crate::types::Device;
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 mod issue;
 mod verify;
@@ -41,7 +42,12 @@ impl Device {
     }
 
     pub fn nonce_key(&self, nonce: &str) -> String {
-        format!("device:nonce:{}:{}", self.id, nonce)
+        let digest = Sha256::digest(nonce.as_bytes());
+        let digest = digest
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        format!("device:nonce:{}:{}", self.id, digest)
     }
 }
 

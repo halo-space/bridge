@@ -95,14 +95,15 @@ impl Wechat {
             .get(token_url)
             .send()
             .await
-            .map_err(|e| Error::OAuthError(format!("WeChat token exchange error: {e}")))?;
+            .map_err(|e| crate::pkg::http::provider(e, "WeChat token exchange error"))?;
 
-        let token_json: serde_json::Value = token_resp
-            .error_for_status()
-            .map_err(|e| Error::OAuthError(format!("WeChat token HTTP error: {e}")))?
-            .json()
-            .await
-            .map_err(|e| Error::OAuthError(format!("Invalid WeChat token JSON: {e}")))?;
+        let token_json: serde_json::Value = crate::pkg::http::json(
+            token_resp
+                .error_for_status()
+                .map_err(|e| crate::pkg::http::provider(e, "WeChat token HTTP error"))?,
+            "WeChat token",
+        )
+        .await?;
         if token_json
             .get("errcode")
             .and_then(|value| value.as_i64())
@@ -138,13 +139,14 @@ impl Wechat {
             .get(user_url)
             .send()
             .await
-            .map_err(|e| Error::OAuthError(format!("WeChat userinfo error: {e}")))?;
-        let user_json: serde_json::Value = user_resp
-            .error_for_status()
-            .map_err(|e| Error::OAuthError(format!("WeChat userinfo HTTP error: {e}")))?
-            .json()
-            .await
-            .map_err(|e| Error::OAuthError(format!("Invalid WeChat userinfo JSON: {e}")))?;
+            .map_err(|e| crate::pkg::http::provider(e, "WeChat userinfo error"))?;
+        let user_json: serde_json::Value = crate::pkg::http::json(
+            user_resp
+                .error_for_status()
+                .map_err(|e| crate::pkg::http::provider(e, "WeChat userinfo HTTP error"))?,
+            "WeChat userinfo",
+        )
+        .await?;
         if user_json
             .get("errcode")
             .and_then(|value| value.as_i64())

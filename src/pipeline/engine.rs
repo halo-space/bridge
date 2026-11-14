@@ -1,3 +1,4 @@
+use super::model::check_value;
 use super::run::clean;
 use super::*;
 use crate::error::{Error, Result};
@@ -145,6 +146,7 @@ impl Pipeline {
 
     pub fn start(&self, context: Context) -> Result<(Run, Progress)> {
         self.validate()?;
+        context.validate()?;
         let mut run = Run {
             run_id: Uuid::new_v4().to_string(),
             context,
@@ -158,6 +160,7 @@ impl Pipeline {
             visits: BTreeMap::new(),
             attempts: BTreeMap::new(),
             steps: 0,
+            expires_at: None,
             denied: None,
             submitted: BTreeSet::new(),
             payloads: BTreeMap::new(),
@@ -168,6 +171,37 @@ impl Pipeline {
         self.schedule(&mut run, &self.start)?;
         let progress = self.advance(&mut run)?;
         Ok((run, progress))
+    }
+
+    /// 从调用方可信短期存储恢复 Run，并校验版本、hash、节点引用、步数和过期时间。
+    ///
+    /// `bytes` 不应直接来自浏览器或其他不可信客户端；调用方仍需在外部存储层
+    /// 设置 TTL，并在恢复后继续按本方法返回的 Run 执行。
+    pub fn restore(&self, bytes: &[u8], now: i64) -> Result<Run> {
+        self.validate()?;
+        let run: Run = serde_json::from_slice(bytes)
+            .map_err(|error| Error::AuthFailed(format!("Invalid Pipeline Run: {error}")))?;
+        if run.pipeline_version != self.config_version || run.pipeline_hash != self.config_hash {
+            return Err(Error::AuthFailed("Pipeline version mismatch".into()));
+        }
+        if run.expires_at.is_some_and(|expires| expires <= now) {
+            return Err(Error::AuthFailed("Pipeline Run expired".into()));
+        }
+        if run.steps > self.max_steps {
+            return Err(Error::AuthFailed("Pipeline step limit exceeded".into()));
+        }
+        let known = |id: &str| self.nodes.contains_key(id);
+        if run.current.as_deref().is_some_and(|id| !known(id))
+            || run.ready.iter().any(|id| !known(id))
+            || run.activated.iter().any(|id| !known(id))
+            || run.completed.iter().any(|id| !known(id))
+            || run.cancelled.iter().any(|id| !known(id))
+        {
+            return Err(Error::AuthFailed(
+                "Pipeline Run contains an unknown node".into(),
+            ));
+        }
+        Ok(run)
     }
 
     pub fn resume(&self, run: &mut Run, event: Event) -> Result<Progress> {
@@ -182,6 +216,9 @@ impl Pipeline {
 
     fn apply(&self, run: &mut Run, event: Event) -> Result<Progress> {
         self.validate()?;
+        if let Event::Input { data, .. } | Event::Pass { data, .. } = &event {
+            check_value(data, 0)?;
+        }
         if run.pipeline_version != self.config_version || run.pipeline_hash != self.config_hash {
             return Err(Error::AuthFailed("Pipeline version mismatch".into()));
         }
@@ -507,6 +544,43 @@ impl Pipeline {
         self.apply(run, event)
     }
 
+    /// 在调用方给定的执行边界内执行一个节点。
+    ///
+    /// `deadline` 只负责在节点开始前和完成后检查边界；Rust future 本身不能
+    /// 被 bridge 强制中断。调用方应在超时或取消时中止外层 future，并把
+    /// `cancelled` 作为自己的取消信号。这样 bridge 不绑定 Tokio、线程池或
+    /// Session 实现，同时保证不会在已过期的运行状态上继续推进图。
+    pub async fn execute_until<R, C>(
+        &self,
+        run: &mut Run,
+        runner: &R,
+        deadline: Instant,
+        cancelled: &C,
+    ) -> Result<Progress>
+    where
+        R: Runner,
+        C: Fn() -> bool + Send + Sync,
+    {
+        let node = run
+            .current
+            .clone()
+            .ok_or_else(|| Error::Internal("Pipeline has no current node".into()))?;
+        if cancelled() || Instant::now() >= deadline {
+            return Ok(Progress::Retry {
+                node,
+                reason: "Pipeline execution boundary reached".into(),
+            });
+        }
+        let progress = self.execute(run, runner).await?;
+        if cancelled() || Instant::now() >= deadline {
+            return Ok(Progress::Retry {
+                node,
+                reason: "Pipeline execution boundary reached".into(),
+            });
+        }
+        Ok(progress)
+    }
+
     /// 使用调用方提供的原子副作用存储执行节点。
     pub async fn execute_with<R: Runner, E: Effects>(
         &self,
@@ -534,8 +608,10 @@ impl Pipeline {
             .unwrap_or_else(|| format!("{}:{}", run.run_id, node_id));
         let guarded =
             matches!(node.kind, Kind::Effect(_)) && (node.once || node.idempotency.is_some());
+        let mut lease = None;
         if guarded {
-            match effects.begin(&key).await? {
+            let timeout = node.timeout.unwrap_or(60).max(1);
+            match effects.begin(&key, timeout).await? {
                 Claim::Done(effect) => {
                     return self.apply(
                         run,
@@ -554,7 +630,7 @@ impl Pipeline {
                         reason: "Pipeline effect is running in another process".into(),
                     });
                 }
-                Claim::New => {}
+                Claim::New { lease: value } => lease = Some(value),
             }
         }
 
@@ -569,8 +645,8 @@ impl Pipeline {
         let output = match runner.run(node, &context).await {
             Ok(output) => output,
             Err(error) => {
-                if guarded {
-                    effects.cancel(&key).await?;
+                if let Some(lease) = lease.as_deref() {
+                    effects.cancel(&key, lease).await?;
                 }
                 return self.runner_error(run, &node_id, node, attempt, error);
             }
@@ -578,8 +654,8 @@ impl Pipeline {
         if let Some(timeout) = node.timeout
             && started.elapsed() > Duration::from_secs(timeout)
         {
-            if guarded {
-                effects.cancel(&key).await?;
+            if let Some(lease) = lease.as_deref() {
+                effects.cancel(&key, lease).await?;
             }
             let reason = "Pipeline node timeout".to_string();
             let attempt = *run.attempts.get(&node_id).unwrap_or(&1);
@@ -603,15 +679,15 @@ impl Pipeline {
                 identity,
                 at,
             } => {
-                if guarded {
+                if let Some(lease) = lease.as_deref() {
                     let effect = Effect {
                         routes: routes.clone(),
                         data: data.clone(),
                         identity: identity.clone(),
                         at,
                     };
-                    if let Err(error) = effects.complete(&key, effect).await {
-                        effects.cancel(&key).await?;
+                    if let Err(error) = effects.complete(&key, lease, effect).await {
+                        effects.cancel(&key, lease).await?;
                         return Err(error);
                     }
                 }
@@ -624,8 +700,8 @@ impl Pipeline {
                 }
             }
             Output::Fail { reason, retry } => {
-                if guarded {
-                    effects.cancel(&key).await?;
+                if let Some(lease) = lease.as_deref() {
+                    effects.cancel(&key, lease).await?;
                 }
                 Event::Fail {
                     node: node_id,
@@ -1059,7 +1135,7 @@ fn retryable(error: &Error) -> bool {
     matches!(
         error,
         Error::StoreError(_)
-            | Error::OAuthError(_)
+            | Error::Transient(_)
             | Error::LdapError(_)
             | Error::EmailFailed(_)
             | Error::SmsFailed(_)
@@ -1275,6 +1351,36 @@ mod tests {
             pipeline.apply(&mut restored, pass("start", &["ok"])).unwrap(),
             Progress::Need { ref node, .. } if node == "done"
         ));
+    }
+
+    #[test]
+    fn restores_only_current_and_unexpired_runs() {
+        let pipeline = Pipeline::new(
+            "start",
+            vec![
+                Node::input("start", vec!["account".into()]),
+                Node::effect("done", "audit"),
+            ],
+        );
+        let (run, _) = pipeline.start(Context::default()).unwrap();
+        let encoded = serde_json::to_vec(&run.expires_at(100)).unwrap();
+        assert!(pipeline.restore(&encoded, 99).is_ok());
+        assert!(pipeline.restore(&encoded, 100).is_err());
+
+        let mut tampered: serde_json::Value = serde_json::from_slice(&encoded).unwrap();
+        tampered["pipeline_version"] = serde_json::json!(7);
+        let tampered = serde_json::to_vec(&tampered).unwrap();
+        assert!(pipeline.restore(&tampered, 99).is_err());
+    }
+
+    #[test]
+    fn rejects_oversized_pipeline_values() {
+        let pipeline = Pipeline::new("start", vec![Node::input("start", Vec::new())]);
+        let context = Context {
+            request: serde_json::json!({ "blob": "x".repeat(9 * 1024) }),
+            ..Context::default()
+        };
+        assert!(pipeline.start(context).is_err());
     }
 
     #[test]
@@ -1671,7 +1777,7 @@ mod tests {
                 .calls
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             if call == 0 {
-                Err(Error::StoreError("temporary store failure".into()))
+                Err(Error::Transient("temporary provider failure".into()))
             } else {
                 Ok(Output::Pass {
                     routes: Vec::new(),
@@ -1700,18 +1806,36 @@ mod tests {
         );
     }
 
+    struct BusinessError;
+
+    impl Runner for BusinessError {
+        async fn run(&self, _node: &Node, _context: &Context) -> Result<Output> {
+            Err(Error::OAuthError("invalid authorization code".into()))
+        }
+    }
+
+    #[tokio::test]
+    async fn does_not_retry_provider_business_rejections() {
+        let pipeline = Pipeline::new("effect", vec![Node::effect("effect", "audit").retries(2)]);
+        let (mut run, _) = pipeline.start(Context::default()).unwrap();
+        assert!(matches!(
+            pipeline.run(&mut run, &BusinessError).await,
+            Err(Error::OAuthError(message)) if message == "invalid authorization code"
+        ));
+    }
+
     struct BusyEffects;
 
     impl Effects for BusyEffects {
-        async fn begin(&self, _key: &str) -> Result<Claim> {
+        async fn begin(&self, _key: &str, _timeout: u64) -> Result<Claim> {
             Ok(Claim::Busy)
         }
 
-        async fn complete(&self, _key: &str, _effect: Effect) -> Result<()> {
+        async fn complete(&self, _key: &str, _lease: &str, _effect: Effect) -> Result<()> {
             Ok(())
         }
 
-        async fn cancel(&self, _key: &str) -> Result<()> {
+        async fn cancel(&self, _key: &str, _lease: &str) -> Result<()> {
             Ok(())
         }
     }
@@ -1727,6 +1851,66 @@ mod tests {
                 .unwrap(),
             Progress::Retry { ref node, .. } if node == "audit"
         ));
+    }
+
+    #[derive(Clone, Default)]
+    struct LeaseEffects {
+        completed: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+    }
+
+    impl Effects for LeaseEffects {
+        async fn begin(&self, _key: &str, timeout: u64) -> Result<Claim> {
+            assert_eq!(timeout, 12);
+            Ok(Claim::New {
+                lease: "lease-1".into(),
+            })
+        }
+
+        async fn complete(&self, _key: &str, lease: &str, _effect: Effect) -> Result<()> {
+            *self.completed.lock().unwrap() = Some(lease.into());
+            Ok(())
+        }
+
+        async fn cancel(&self, _key: &str, _lease: &str) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn completes_effect_with_the_store_lease() {
+        let pipeline = Pipeline::new(
+            "audit",
+            vec![Node::effect("audit", "audit").once(true).timeout(12)],
+        );
+        let (mut run, _) = pipeline.start(Context::default()).unwrap();
+        let effects = LeaseEffects::default();
+        assert_eq!(
+            pipeline
+                .execute_with(&mut run, &Pass, &effects)
+                .await
+                .unwrap(),
+            Progress::Done
+        );
+        assert_eq!(
+            effects.completed.lock().unwrap().as_deref(),
+            Some("lease-1")
+        );
+    }
+
+    #[tokio::test]
+    async fn honors_explicit_execution_boundary() {
+        let pipeline = Pipeline::new("audit", vec![Node::effect("audit", "audit")]);
+        let (mut run, _) = pipeline.start(Context::default()).unwrap();
+        let progress = pipeline
+            .execute_until(
+                &mut run,
+                &Pass,
+                Instant::now() - Duration::from_secs(1),
+                &|| false,
+            )
+            .await
+            .unwrap();
+        assert!(matches!(progress, Progress::Retry { node, .. } if node == "audit"));
     }
 
     struct Custom;

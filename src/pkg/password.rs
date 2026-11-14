@@ -4,7 +4,6 @@ use argon2::{
 };
 use base64::Engine;
 use bcrypt::{DEFAULT_COST, hash as bcrypt_hash, verify as bcrypt_verify};
-use digest::Digest;
 use pbkdf2::pbkdf2_hmac;
 use rand_core::{OsRng, RngCore};
 use sha2::Sha256;
@@ -185,6 +184,9 @@ impl Codec for Pbkdf2 {
         let rounds: u32 = parts[2]
             .parse()
             .map_err(|_| Error::AuthFailed("Invalid PBKDF2 rounds".into()))?;
+        if !(10_000..=5_000_000).contains(&rounds) {
+            return Err(Error::AuthFailed("PBKDF2 rounds out of range".into()));
+        }
         let enc = base64::engine::general_purpose::URL_SAFE_NO_PAD;
         let salt = enc
             .decode(parts[3])
@@ -194,7 +196,7 @@ impl Codec for Pbkdf2 {
             .map_err(|_| Error::AuthFailed("Invalid PBKDF2 hash".into()))?;
         let mut actual = vec![0u8; expected.len()];
         pbkdf2_hmac::<Sha256>(password.as_bytes(), &salt, rounds, &mut actual);
-        Ok(actual == expected)
+        Ok(same(&actual, &expected))
     }
 }
 
@@ -207,30 +209,49 @@ impl Codec for Sm3 {
     }
 
     fn hash(&self, password: &str) -> Result<String> {
+        const ROUNDS: u32 = 100_000;
         let mut salt = [0u8; 16];
         OsRng.fill_bytes(&mut salt);
-        let mut hash = Sm3Hash::new();
-        hash.update(salt);
-        hash.update(password.as_bytes());
-        let digest = hash.finalize();
+        let mut digest = [0u8; 32];
+        pbkdf2_hmac::<Sm3Hash>(password.as_bytes(), &salt, ROUNDS, &mut digest);
         let enc = base64::engine::general_purpose::URL_SAFE_NO_PAD;
-        Ok(format!("$sm3${}${:x}", enc.encode(salt), digest))
+        Ok(format!(
+            "$sm3-pbkdf2${ROUNDS}${}${}",
+            enc.encode(salt),
+            enc.encode(digest)
+        ))
     }
 
     fn verify(&self, password: &str, encoded: &str) -> Result<bool> {
         let parts: Vec<&str> = encoded.split('$').collect();
-        if parts.len() != 4 || parts[1] != "sm3" {
+        if parts.len() != 5 || parts[1] != "sm3-pbkdf2" {
             return Err(Error::AuthFailed("Invalid SM3 password hash".into()));
+        }
+        let rounds: u32 = parts[2]
+            .parse()
+            .map_err(|_| Error::AuthFailed("Invalid SM3 rounds".into()))?;
+        if !(10_000..=5_000_000).contains(&rounds) {
+            return Err(Error::AuthFailed("SM3 rounds out of range".into()));
         }
         let enc = base64::engine::general_purpose::URL_SAFE_NO_PAD;
         let salt = enc
-            .decode(parts[2])
+            .decode(parts[3])
             .map_err(|_| Error::AuthFailed("Invalid SM3 salt".into()))?;
-        let mut hash = Sm3Hash::new();
-        hash.update(&salt);
-        hash.update(password.as_bytes());
-        Ok(format!("{:x}", hash.finalize()) == parts[3])
+        let expected = enc
+            .decode(parts[4])
+            .map_err(|_| Error::AuthFailed("Invalid SM3 hash".into()))?;
+        let mut actual = vec![0u8; expected.len()];
+        pbkdf2_hmac::<Sm3Hash>(password.as_bytes(), &salt, rounds, &mut actual);
+        Ok(same(&actual, &expected))
     }
+}
+
+fn same(left: &[u8], right: &[u8]) -> bool {
+    let mut diff = left.len() ^ right.len();
+    for (a, b) in left.iter().zip(right) {
+        diff |= usize::from(a ^ b);
+    }
+    diff == 0
 }
 
 pub struct Password;

@@ -90,6 +90,7 @@ pub struct RiskAssessment {
 }
 
 /// 自适应风险评估引擎
+#[derive(Debug, Clone)]
 pub struct RiskEngine {
     config: RiskConfig,
 }

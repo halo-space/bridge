@@ -12,6 +12,8 @@ pub struct Claims {
     pub nbf: i64,
     pub jti: String,
     pub username: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
     /// 自定义扩展声明 (对齐 Authing 3.18 IdToken 扩展字段)
     #[serde(default, flatten)]
     pub custom: serde_json::Map<String, serde_json::Value>,

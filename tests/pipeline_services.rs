@@ -1,11 +1,12 @@
 use halo::bridge::{
-    CaptchaType, CaptchaVerifyReq, Context, Device, Devices, Event, Factors, Node, Notify,
-    Passkeys, Pipeline, Progress, Secrets, Services, Users,
+    CaptchaType, CaptchaVerifyReq, Context, Decision, Device, Devices, Event, Factors, Limits,
+    Node, Notify, Passkeys, Pipeline, Progress, Rule, Secrets, Services, Users,
 };
 use halo::bridge::{Error, Events, TotpBinding, User};
 use halo::bridge::{SmsConfig, SmsSender, SmtpConfig, SmtpSender};
 use halo::factor::passkey::Passkey;
 use halo::pkg::totp::Totp;
+use halo::risk::{RiskConfig, RiskEngine};
 use halo::validator::issuer::Code;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -93,7 +94,7 @@ struct FactorMem {
 }
 
 impl Factors for FactorMem {
-    async fn find_totp(&self, _user_id: i64) -> halo::Result<Option<TotpBinding>> {
+    async fn find_totp(&self, _identity: &halo::Identity) -> halo::Result<Option<TotpBinding>> {
         Ok(Some(self.binding.clone()))
     }
 }
@@ -139,6 +140,25 @@ impl Events for EventMem {
 #[derive(Clone, Default)]
 struct DeviceMem {
     device: Arc<Mutex<Option<Device>>>,
+}
+
+#[derive(Clone, Default)]
+struct LimitMem {
+    allow: Arc<Mutex<bool>>,
+    calls: Arc<Mutex<u32>>,
+}
+
+impl Limits for LimitMem {
+    async fn allow(&self, _key: &str, _limit: u32, _window_secs: u64) -> halo::Result<bool> {
+        *self.calls.lock().unwrap() += 1;
+        Ok(*self.allow.lock().unwrap())
+    }
+
+    async fn fail(&self, _key: &str, rule: Rule) -> halo::Result<Decision> {
+        Ok(Decision::Deny {
+            retry_after: rule.lock,
+        })
+    }
 }
 
 impl Devices for DeviceMem {
@@ -350,4 +370,111 @@ async fn pipeline_runs_totp_and_password_verifiers() {
         pipeline.run(&mut run, &services).await.unwrap(),
         Progress::Done
     );
+}
+
+#[tokio::test]
+async fn services_apply_callers_limits_to_issue_nodes() {
+    let limits = LimitMem {
+        allow: Arc::new(Mutex::new(false)),
+        calls: Arc::new(Mutex::new(0)),
+    };
+    let calls = limits.calls.clone();
+    let services = services(
+        Mem::default(),
+        user(),
+        FactorMem {
+            binding: TotpBinding {
+                secret: Totp::generate_secret(),
+                enabled: true,
+            },
+        },
+        EventMem::default(),
+    )
+    .limits(limits);
+    let pipeline = Pipeline::new(
+        "phone",
+        vec![
+            Node::input("phone", vec!["phone".into()]).edge(None::<String>, "issue"),
+            Node::issue("issue", "sms")
+                .args(serde_json::json!({ "limit": 1, "window": 60 }))
+                .edge(None::<String>, "done"),
+            Node::effect("done", "audit"),
+        ],
+    );
+    let (mut run, _) = pipeline.start(Context::default()).unwrap();
+    pipeline
+        .resume(
+            &mut run,
+            Event::Input {
+                node: "phone".into(),
+                data: serde_json::json!({ "phone": "13800138000" }),
+                at: 1,
+            },
+        )
+        .unwrap();
+    let error = pipeline.run(&mut run, &services).await.unwrap_err();
+    assert!(error.to_string().contains("Rate limit exceeded"));
+    assert_eq!(*calls.lock().unwrap(), 1);
+}
+
+#[tokio::test]
+async fn services_can_route_risk_checks() {
+    let services = services(
+        Mem::default(),
+        user(),
+        FactorMem {
+            binding: TotpBinding {
+                secret: Totp::generate_secret(),
+                enabled: true,
+            },
+        },
+        EventMem::default(),
+    )
+    .risk(RiskEngine::new(RiskConfig::default()));
+    let pipeline = Pipeline::new(
+        "risk_input",
+        vec![
+            Node::input("risk_input", vec!["context".into(), "history".into()])
+                .edge(None::<String>, "risk"),
+            Node::check("risk", "risk")
+                .edge(Some("allow"), "done")
+                .edge(Some("mfa"), "mfa")
+                .edge(Some("block"), "blocked"),
+            Node::effect("done", "audit"),
+            Node::effect("mfa", "audit"),
+            Node::effect("blocked", "audit"),
+        ],
+    );
+    let (mut run, _) = pipeline.start(Context::default()).unwrap();
+    pipeline
+        .resume(
+            &mut run,
+            Event::Input {
+                node: "risk_input".into(),
+                data: serde_json::json!({
+                    "context": {
+                        "client_ip": "1.1.1.1",
+                        "user_agent": "Halo",
+                        "geo_country": "CN",
+                        "geo_city": "Beijing",
+                        "timestamp": 2000,
+                        "consecutive_failed_attempts": 0
+                    },
+                    "history": {
+                        "known_ips": ["1.1.1.1"],
+                        "known_user_agents": ["Halo"],
+                        "last_country": "CN",
+                        "last_login_at": 1000,
+                        "last_ip": "1.1.1.1"
+                    }
+                }),
+                at: 1,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        pipeline.run(&mut run, &services).await.unwrap(),
+        Progress::Done
+    );
+    assert_eq!(run.context.data["risk"]["decision"], "Allow");
 }

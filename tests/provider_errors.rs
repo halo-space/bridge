@@ -16,12 +16,12 @@ async fn providers_surface_network_failures() {
         scope: None,
     })
     .auth(DEAD);
-    assert!(
+    assert!(matches!(
         github
             .exchange_code_for_profile("code", "https://app/callback")
-            .await
-            .is_err()
-    );
+            .await,
+        Err(Error::Transient(_))
+    ));
 
     let google = Google::new(GoogleConfig {
         client_id: "id".into(),

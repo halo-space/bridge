@@ -11,7 +11,7 @@ pub use clients::Clients;
 pub use devices::Devices;
 pub use events::Events;
 pub use factors::Factors;
-pub use limits::Limits;
+pub use limits::{Decision, Limits, Noop, Rule};
 pub use passkeys::Passkeys;
 pub use secrets::Secrets;
 pub use users::Users;

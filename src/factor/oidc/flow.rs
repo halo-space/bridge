@@ -1,8 +1,9 @@
 use super::pkce::Pkce;
+use super::server::TokenResponse;
 use crate::error::{Error, Result};
-use crate::store::{Clients, Secrets, Users};
+use crate::store::{Clients, Secrets};
 use crate::token::Token;
-use crate::types::{AuthCode, OAuthClient};
+use crate::types::{AuthCode, Identity, OAuthClient};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

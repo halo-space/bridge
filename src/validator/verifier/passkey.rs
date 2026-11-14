@@ -1,5 +1,6 @@
 use crate::error::Result;
 use crate::factor::passkey::Passkey as StoredPasskey;
+use crate::store::Secrets;
 use base64::Engine;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -69,6 +70,31 @@ impl Passkey {
         })
     }
 
+    /// 使用调用方保存的注册状态完成校验，并在成功后原子消费状态。
+    pub async fn register_once<K: Secrets>(
+        &self,
+        kv: &K,
+        key: &str,
+        input: &str,
+        state: &str,
+    ) -> Result<StoredPasskey> {
+        let stored = kv.get(key).await?.ok_or_else(|| {
+            crate::error::Error::WebAuthnError("Passkey registration state expired".into())
+        })?;
+        if stored != state {
+            return Err(crate::error::Error::WebAuthnError(
+                "Passkey registration state mismatch".into(),
+            ));
+        }
+        let passkey = self.register(input, &stored)?;
+        if !kv.take_if(key, &stored).await? {
+            return Err(crate::error::Error::WebAuthnError(
+                "Passkey registration state already used".into(),
+            ));
+        }
+        Ok(passkey)
+    }
+
     /// 校验认证结果并返回计数器和最新凭证状态。
     pub fn verify(&self, input: &str, state: &str) -> Result<Auth> {
         let input: PublicKeyCredential = serde_json::from_str(input)
@@ -100,6 +126,31 @@ impl Passkey {
             needs_update: result.needs_update(),
             data,
         })
+    }
+
+    /// 使用调用方保存的认证状态完成校验，并在成功后原子消费状态。
+    pub async fn verify_once<K: Secrets>(
+        &self,
+        kv: &K,
+        key: &str,
+        input: &str,
+        state: &str,
+    ) -> Result<Auth> {
+        let stored = kv.get(key).await?.ok_or_else(|| {
+            crate::error::Error::WebAuthnError("Passkey authentication state expired".into())
+        })?;
+        if stored != state {
+            return Err(crate::error::Error::WebAuthnError(
+                "Passkey authentication state mismatch".into(),
+            ));
+        }
+        let auth = self.verify(input, &stored)?;
+        if !kv.take_if(key, &stored).await? {
+            return Err(crate::error::Error::WebAuthnError(
+                "Passkey authentication state already used".into(),
+            ));
+        }
+        Ok(auth)
     }
 }
 

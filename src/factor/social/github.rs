@@ -118,14 +118,15 @@ impl Github {
             .form(&params)
             .send()
             .await
-            .map_err(|e| Error::OAuthError(format!("GitHub token exchange network error: {e}")))?;
+            .map_err(|e| crate::pkg::http::provider(e, "GitHub token exchange network error"))?;
 
-        let token_json: serde_json::Value = token_resp
-            .error_for_status()
-            .map_err(|e| Error::OAuthError(format!("GitHub token HTTP error: {e}")))?
-            .json()
-            .await
-            .map_err(|e| Error::OAuthError(format!("Invalid GitHub token JSON: {e}")))?;
+        let token_json: serde_json::Value = crate::pkg::http::json(
+            token_resp
+                .error_for_status()
+                .map_err(|e| crate::pkg::http::provider(e, "GitHub token HTTP error"))?,
+            "GitHub token",
+        )
+        .await?;
 
         let access_token = token_json["access_token"].as_str().ok_or_else(|| {
             let err = token_json["error_description"]
@@ -143,14 +144,15 @@ impl Github {
             .header("Accept", "application/json")
             .send()
             .await
-            .map_err(|e| Error::OAuthError(format!("GitHub user fetch network error: {e}")))?;
+            .map_err(|e| crate::pkg::http::provider(e, "GitHub user fetch network error"))?;
 
-        let mut user_json: serde_json::Value = user_resp
-            .error_for_status()
-            .map_err(|e| Error::OAuthError(format!("GitHub user HTTP error: {e}")))?
-            .json()
-            .await
-            .map_err(|e| Error::OAuthError(format!("Invalid GitHub user JSON: {e}")))?;
+        let mut user_json: serde_json::Value = crate::pkg::http::json(
+            user_resp
+                .error_for_status()
+                .map_err(|e| crate::pkg::http::provider(e, "GitHub user HTTP error"))?,
+            "GitHub user",
+        )
+        .await?;
 
         // 若用户公开邮箱为空，尝试拉取 primary 邮箱
         if user_json["email"].is_null()
@@ -162,7 +164,8 @@ impl Github {
                 .send()
                 .await
             && let Ok(emails_resp) = emails_resp.error_for_status()
-            && let Ok(emails_json) = emails_resp.json::<serde_json::Value>().await
+            && let Ok(emails_json) =
+                crate::pkg::http::json::<serde_json::Value>(emails_resp, "GitHub emails").await
             && let Some(arr) = emails_json.as_array()
         {
             let primary_email = arr

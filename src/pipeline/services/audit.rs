@@ -1,6 +1,6 @@
 use super::*;
 
-impl<S, U, F, P, E, D> Services<S, U, F, P, E, D>
+impl<S, U, F, P, E, D, L> Services<S, U, F, P, E, D, L>
 where
     S: Secrets,
     U: Users,
@@ -8,28 +8,32 @@ where
     P: Passkeys,
     E: Events,
     D: Devices,
+    L: Limits,
 {
     pub(super) async fn audit(&self, context: &Context, kind: &str) -> Result<Output> {
         let event_type = match kind {
-            "audit" | "auth.success" | "auth_success" => AuditEventType::AuthSuccess,
-            "auth.failed" | "auth_failed" => AuditEventType::AuthFailed,
-            "mfa.challenge" | "mfa_challenged" => AuditEventType::MfaChallenged,
-            "mfa.passed" | "mfa_passed" => AuditEventType::MfaPassed,
-            "mfa.failed" | "mfa_failed" => AuditEventType::MfaFailed,
-            "passkey.success" | "passkey_auth_success" => AuditEventType::PasskeyAuthSuccess,
-            "passkey.failed" | "passkey_auth_failed" => AuditEventType::PasskeyAuthFailed,
+            "audit" | "auth.success" => AuditEventType::AuthSuccess,
+            "auth.failed" => AuditEventType::AuthFailed,
+            "mfa.challenge" => AuditEventType::MfaChallenged,
+            "mfa.passed" => AuditEventType::MfaPassed,
+            "mfa.failed" => AuditEventType::MfaFailed,
+            "passkey.success" => AuditEventType::PasskeyAuthSuccess,
+            "passkey.failed" => AuditEventType::PasskeyAuthFailed,
             _ => {
                 return Err(Error::Unsupported(format!(
                     "Unsupported pipeline audit: {kind}"
                 )));
             }
         };
-        let event = AuditEvent::new(
+        let mut event = AuditEvent::new(
             event_type,
             event_string(context, "client_ip").unwrap_or_default(),
             AuditOutcome::Success,
         )
         .with_metadata(json!({ "pipeline": true }));
+        if let Some(identity) = context.identity.clone() {
+            event = event.with_identity(identity);
+        }
         self.events.record_event(&event).await?;
         Ok(pass(json!({ "recorded": true, "event_id": event.id })))
     }

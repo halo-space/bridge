@@ -17,7 +17,7 @@ pub struct JwkKey {
 }
 
 /// OIDC 标准 /.well-known/jwks.json 返回集合
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct JwksResponse {
     pub keys: Vec<JwkKey>,
 }

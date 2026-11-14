@@ -107,14 +107,15 @@ impl Google {
             ])
             .send()
             .await
-            .map_err(|e| Error::OAuthError(format!("Google token exchange error: {e}")))?;
+            .map_err(|e| crate::pkg::http::provider(e, "Google token exchange error"))?;
 
-        let token_json: serde_json::Value = token_resp
-            .error_for_status()
-            .map_err(|e| Error::OAuthError(format!("Google token HTTP error: {e}")))?
-            .json()
-            .await
-            .map_err(|e| Error::OAuthError(format!("Invalid Google token JSON: {e}")))?;
+        let token_json: serde_json::Value = crate::pkg::http::json(
+            token_resp
+                .error_for_status()
+                .map_err(|e| crate::pkg::http::provider(e, "Google token HTTP error"))?,
+            "Google token",
+        )
+        .await?;
         let access_token = token_json
             .get("access_token")
             .and_then(|value| value.as_str())
@@ -132,13 +133,14 @@ impl Google {
             .bearer_auth(access_token)
             .send()
             .await
-            .map_err(|e| Error::OAuthError(format!("Google userinfo error: {e}")))?;
-        let user_json: serde_json::Value = user_resp
-            .error_for_status()
-            .map_err(|e| Error::OAuthError(format!("Google userinfo HTTP error: {e}")))?
-            .json()
-            .await
-            .map_err(|e| Error::OAuthError(format!("Invalid Google userinfo JSON: {e}")))?;
+            .map_err(|e| crate::pkg::http::provider(e, "Google userinfo error"))?;
+        let user_json: serde_json::Value = crate::pkg::http::json(
+            user_resp
+                .error_for_status()
+                .map_err(|e| crate::pkg::http::provider(e, "Google userinfo HTTP error"))?,
+            "Google userinfo",
+        )
+        .await?;
         Self::parse(&user_json)
     }
 }
