@@ -370,7 +370,7 @@ fn test_token_issue_and_verify_rs256_and_jwks() {
     assert_eq!(verified_aud.aud, Some("halo-client".to_string()));
 
     // 3. 验证 JWKS 导出
-    let jwks = token::JwksResponse::from_rsa_public_key(&pub_key, "key-2026");
+    let jwks = token::JwksResponse::from_rsa_pem(&pub_pem_str, "key-2026").unwrap();
     assert_eq!(jwks.keys.len(), 1);
     assert_eq!(jwks.keys[0].kty, "RSA");
     assert_eq!(jwks.keys[0].alg, "RS256");
@@ -472,7 +472,9 @@ fn external_oidc_authorize_and_id_token_validation() {
     let private = rsa::RsaPrivateKey::new(&mut rng, 2048).unwrap();
     let private_pem = private.to_pkcs8_pem(LineEnding::LF).unwrap();
     let public = rsa::RsaPublicKey::from(&private);
-    let jwks = token::JwksResponse::from_rsa_public_key(&public, "key-1");
+    let public_pem =
+        rsa::pkcs8::EncodePublicKey::to_public_key_pem(&public, LineEnding::LF).unwrap();
+    let jwks = token::JwksResponse::from_rsa_pem(&public_pem, "key-1").unwrap();
     let discovery = oidc::Discovery {
         issuer: issuer.into(),
         authorization_endpoint: "https://login.example/oauth2/authorize".into(),

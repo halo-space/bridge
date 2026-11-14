@@ -11,7 +11,9 @@ async fn exchange_code_reads_discovery_and_validates_id_token() {
     let private = rsa::RsaPrivateKey::new(&mut rng, 2048).unwrap();
     let private_pem = private.to_pkcs8_pem(LineEnding::LF).unwrap();
     let public = rsa::RsaPublicKey::from(&private);
-    let jwks = JwksResponse::from_rsa_public_key(&public, "key-1");
+    let public_pem =
+        rsa::pkcs8::EncodePublicKey::to_public_key_pem(&public, LineEnding::LF).unwrap();
+    let jwks = JwksResponse::from_rsa_pem(&public_pem, "key-1").unwrap();
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());

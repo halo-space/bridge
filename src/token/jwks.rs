@@ -1,7 +1,7 @@
 use base64::Engine;
 use base64::prelude::BASE64_URL_SAFE_NO_PAD;
-use rsa::RsaPublicKey;
-use rsa::traits::PublicKeyParts;
+use openssl::pkey::Public;
+use openssl::rsa::Rsa as OpenRsa;
 use serde::{Deserialize, Serialize};
 
 /// OIDC 标准 JWKS 密钥项
@@ -45,9 +45,16 @@ impl JwksResponse {
     }
 
     /// 从标准 `RsaPublicKey` 对象直接生成 JWKS
-    pub fn from_rsa_public_key(public_key: &RsaPublicKey, kid: impl Into<String>) -> Self {
-        let n_bytes = public_key.n().to_bytes_be();
-        let e_bytes = public_key.e().to_bytes_be();
+    pub fn from_rsa_public_key(public_key: &OpenRsa<Public>, kid: impl Into<String>) -> Self {
+        let n_bytes = public_key.n().to_vec();
+        let e_bytes = public_key.e().to_vec();
         Self::from_rsa_components(&n_bytes, &e_bytes, kid)
+    }
+
+    pub fn from_rsa_pem(pem: &str, kid: impl Into<String>) -> crate::Result<Self> {
+        let public = OpenRsa::public_key_from_pem(pem.as_bytes()).map_err(|error| {
+            crate::Error::TokenError(format!("Invalid RSA public key: {error}"))
+        })?;
+        Ok(Self::from_rsa_public_key(&public, kid))
     }
 }
