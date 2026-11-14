@@ -609,7 +609,7 @@ Passkey 通常分成签发注册/认证选项和校验浏览器返回值：
 ```text
 1. 已有身份进入 Passkey：`issue(webauthn)`
 2. 把浏览器返回值提交给：`input(credential)`
-3. 校验浏览器凭证：`verify(passkey)`
+3. 校验浏览器凭证：`verify(passkey)`，提交 `input`、`state` 和调用方保存状态的 `state_key`
 4. 返回 `Done`
 ```
 
@@ -620,7 +620,7 @@ Passkey 通常分成签发注册/认证选项和校验浏览器返回值：
 1. 先完成用户身份确认。
 2. 通过 `issue(webauthn)` 获取浏览器选项和 state。
 3. 把 state 短期保存到 `Secrets`。
-4. 接收浏览器 Passkey 响应后提交给 `verify_once(passkey)`，让 bridge 用 `Secrets::take_if` 原子消费状态。
+4. 接收浏览器 Passkey 响应后提交给 `verify_once(passkey)`，让 bridge 用 `Secrets::take_if` 原子消费状态。使用默认 `Services` 时，Passkey 校验节点也必须提供 `state_key`。
 5. 通过 `Passkeys::update` 做计数器条件更新。
 
 因此，`issue(webauthn)` 的结果需要返回给浏览器，浏览器返回的 credential 再由调用方提交给 `input(credential)`；这两个请求之间的 state 由调用方短期保存。直接使用 `verify` 或 `register` 时，调用方必须自己完成同样的单次消费；更安全的入口是 `verify_once` 和 `register_once`。
@@ -1183,5 +1183,7 @@ cargo bench --bench security
 节点 `timeout` 是 bridge 对节点结果的超时判定。调用方可以使用 `Pipeline::execute_until` 传入自己的 `deadline` 和取消信号；方法只在节点开始前和结束后检查边界，真正的网络请求中断由调用方运行时取消外层 future。带 `once` 或 `idempotency` 的副作用节点使用 `Effects` 租约，调用方存储负责原子占用、完成、取消和过期接管。
 
 `Context`、节点输入、Evidence 和可恢复 `Run` 有 JSON 大小、深度、字段数和字符串长度限制；Provider JSON 使用 `pkg::http::json` 限制响应体大小。对有明确类型边界的 API，使用 `Sensitive<T>` 标记密码、验证码、Token 和 Secret；JSON 状态仍会执行字段清理，作为最后一道保护。持久化 Run 前调用 `Run::clear`，并由调用方存储设置 TTL。
+
+包含客户端密钥、SMTP 密码、短信密钥、LDAP 密码、Token、授权码或 Passkey 状态的公共模型不提供默认 `Debug` 输出，避免调用日志意外打印认证材料；需要记录时只记录主体、Provider、节点和结果等非敏感摘要。
 
 风险节点统一读取 `RiskContext` 和 `UserHistory`，输出 `allow`、`mfa` 或 `block` 路由；调用方可以把 `mfa` 接到 TOTP、Passkey 或短信节点。频控和锁定统一使用 `limit`、`window`、`lock` 与 `Limits` trait；验证成功清除失败计数，失败交给 `Limits::fail` 决定是否锁定。重认证由 `rules::Reauth` 表达，身份、租户和策略存储仍由调用方负责。

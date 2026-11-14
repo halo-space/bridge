@@ -29,7 +29,7 @@ where
             .and_then(Value::as_str)
             .ok_or_else(|| Error::Internal("Missing code target".into()))?;
         let key = data
-            .get("key")
+            .get("code_key")
             .and_then(Value::as_str)
             .ok_or_else(|| Error::Internal("Missing code key".into()))?;
         let code = self

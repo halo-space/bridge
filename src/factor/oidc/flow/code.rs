@@ -104,7 +104,7 @@ impl Flow {
 
         if !client.is_public {
             match (client.client_secret, &req.client_secret) {
-                (Some(expected), Some(actual)) if expected == *actual => {}
+                (Some(expected), Some(actual)) if super::secret_eq(&expected, actual) => {}
                 _ => return Err(Error::InvalidClient("Client secret invalid".to_string())),
             }
         }

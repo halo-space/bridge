@@ -106,15 +106,17 @@ impl Passkey {
             .webauthn
             .finish_passkey_authentication(&input, &state)
             .map_err(|e| crate::error::Error::WebAuthnError(e.to_string()))?;
-        let data = passkeys
+        let mut matched = passkeys
             .into_iter()
             .find(|passkey| passkey.cred_id() == result.cred_id())
-            .map(|mut passkey| {
-                passkey.update_credential(&result);
-                serde_json::to_string(&passkey)
-                    .map_err(|e| crate::error::Error::Internal(e.to_string()))
-            })
-            .transpose()?;
+            .ok_or_else(|| {
+                crate::error::Error::WebAuthnError("Passkey credential is not registered".into())
+            })?;
+        matched.update_credential(&result);
+        let data = Some(
+            serde_json::to_string(&matched)
+                .map_err(|e| crate::error::Error::Internal(e.to_string()))?,
+        );
         Ok(Auth {
             credential_id: base64::engine::general_purpose::URL_SAFE_NO_PAD
                 .encode(result.cred_id()),

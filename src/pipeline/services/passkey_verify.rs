@@ -17,7 +17,10 @@ where
             .ok_or_else(|| Error::WebAuthnError("Pipeline Passkey verifier is missing".into()))?;
         let input = string(data, "input").or_else(|_| string(data, "credential"))?;
         let state = string(data, "state")?;
-        let auth = passkey.verify(&input, &state)?;
+        let state_key = string(data, "state_key")?;
+        let auth = passkey
+            .verify_once(&self.secrets, &state_key, &input, &state)
+            .await?;
         let stored = self
             .passkeys
             .find(&auth.credential_id)

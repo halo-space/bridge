@@ -90,7 +90,7 @@ struct AuthState {
     passkeys: Vec<NativePasskey>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Start {
     pub options: serde_json::Value,
     pub state: String,

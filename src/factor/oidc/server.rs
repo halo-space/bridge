@@ -48,7 +48,7 @@ impl OidcDiscovery {
 }
 
 /// OIDC 标准令牌换发响应
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct TokenResponse {
     pub access_token: String,
     pub token_type: String,

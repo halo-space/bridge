@@ -190,12 +190,25 @@ impl Pipeline {
         if run.steps > self.max_steps {
             return Err(Error::AuthFailed("Pipeline step limit exceeded".into()));
         }
+        run.context.validate()?;
         let known = |id: &str| self.nodes.contains_key(id);
         if run.current.as_deref().is_some_and(|id| !known(id))
             || run.ready.iter().any(|id| !known(id))
             || run.activated.iter().any(|id| !known(id))
             || run.completed.iter().any(|id| !known(id))
             || run.cancelled.iter().any(|id| !known(id))
+            || run
+                .arrived
+                .iter()
+                .any(|(target, sources)| !known(target) || sources.iter().any(|id| !known(id)))
+            || run
+                .failed
+                .iter()
+                .any(|(target, sources)| !known(target) || sources.iter().any(|id| !known(id)))
+            || run.visits.keys().any(|id| !known(id))
+            || run.attempts.keys().any(|id| !known(id))
+            || run.payloads.keys().any(|id| !known(id))
+            || run.denied.as_ref().is_some_and(|(id, _)| !known(id))
         {
             return Err(Error::AuthFailed(
                 "Pipeline Run contains an unknown node".into(),
@@ -660,6 +673,17 @@ impl Pipeline {
             let reason = "Pipeline node timeout".to_string();
             let attempt = *run.attempts.get(&node_id).unwrap_or(&1);
             if attempt <= node.retries {
+                if matches!(node.kind, Kind::Verify(_)) {
+                    run.context.data.remove(&node_id);
+                    run.payloads.remove(&node_id);
+                    clear_completed(
+                        self,
+                        &mut run.context,
+                        &mut run.payloads,
+                        &run.completed,
+                        None,
+                    );
+                }
                 return Ok(Progress::Retry {
                     node: node_id,
                     reason,

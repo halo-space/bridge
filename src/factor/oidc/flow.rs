@@ -4,9 +4,11 @@ use crate::error::{Error, Result};
 use crate::store::{Clients, Secrets};
 use crate::token::Token;
 use crate::types::{AuthCode, Identity, OAuthClient};
+use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
+use sha2::Sha256;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct AuthorizeRequest {
     pub response_type: String,
     pub client_id: String,
@@ -18,7 +20,7 @@ pub struct AuthorizeRequest {
     pub nonce: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct TokenRequest {
     pub grant_type: String,
     pub code: Option<String>,
@@ -31,6 +33,18 @@ pub struct TokenRequest {
 }
 
 pub struct Flow;
+
+pub(super) fn secret_eq(expected: &str, actual: &str) -> bool {
+    type HmacSha256 = Hmac<Sha256>;
+    let mut expected_mac =
+        HmacSha256::new_from_slice(b"halo-bridge-client-secret").expect("fixed HMAC key is valid");
+    expected_mac.update(expected.as_bytes());
+    let expected_digest = expected_mac.finalize().into_bytes();
+    let mut actual_mac =
+        HmacSha256::new_from_slice(b"halo-bridge-client-secret").expect("fixed HMAC key is valid");
+    actual_mac.update(actual.as_bytes());
+    actual_mac.verify_slice(&expected_digest).is_ok()
+}
 
 mod authorize;
 mod code;

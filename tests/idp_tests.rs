@@ -1309,6 +1309,24 @@ fn test_custom_claims_token_injection() {
     assert_eq!(claims.custom.get("employee_id").unwrap(), "HALO-999");
 }
 
+#[test]
+fn test_custom_claims_cannot_override_reserved_claims() {
+    let service = token::Token::new(
+        "custom-claims-secret-that-is-at-least-32-bytes",
+        "halo-idp",
+        300,
+        600,
+    );
+    let identity = Identity::new("local", "subject");
+    let mut claims = serde_json::Map::new();
+    claims.insert("sub".into(), serde_json::json!("attacker"));
+    assert!(
+        service
+            .issue_identity_with_claims(&identity, None, None, Some(claims))
+            .is_err()
+    );
+}
+
 #[tokio::test]
 async fn test_passkey_fixture_register_request_verify() {
     let issuer = IssuePasskey::new(

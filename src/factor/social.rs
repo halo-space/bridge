@@ -12,7 +12,7 @@ use crate::types::Identity;
 use serde::{Deserialize, Serialize};
 
 /// 社交平台返回的标准身份资料。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct SocialProfile {
     pub provider: String,
     pub openid: String,

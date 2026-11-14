@@ -191,9 +191,15 @@ impl Codec for Pbkdf2 {
         let salt = enc
             .decode(parts[3])
             .map_err(|_| Error::AuthFailed("Invalid PBKDF2 salt".into()))?;
+        if salt.len() != 16 {
+            return Err(Error::AuthFailed("Invalid PBKDF2 salt length".into()));
+        }
         let expected = enc
             .decode(parts[4])
             .map_err(|_| Error::AuthFailed("Invalid PBKDF2 hash".into()))?;
+        if expected.len() != 32 {
+            return Err(Error::AuthFailed("Invalid PBKDF2 hash length".into()));
+        }
         let mut actual = vec![0u8; expected.len()];
         pbkdf2_hmac::<Sha256>(password.as_bytes(), &salt, rounds, &mut actual);
         Ok(same(&actual, &expected))
@@ -237,9 +243,15 @@ impl Codec for Sm3 {
         let salt = enc
             .decode(parts[3])
             .map_err(|_| Error::AuthFailed("Invalid SM3 salt".into()))?;
+        if salt.len() != 16 {
+            return Err(Error::AuthFailed("Invalid SM3 salt length".into()));
+        }
         let expected = enc
             .decode(parts[4])
             .map_err(|_| Error::AuthFailed("Invalid SM3 hash".into()))?;
+        if expected.len() != 32 {
+            return Err(Error::AuthFailed("Invalid SM3 hash length".into()));
+        }
         let mut actual = vec![0u8; expected.len()];
         pbkdf2_hmac::<Sm3Hash>(password.as_bytes(), &salt, rounds, &mut actual);
         Ok(same(&actual, &expected))

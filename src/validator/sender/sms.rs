@@ -12,7 +12,7 @@ use aliyun::Aliyun;
 use tencent::Tencent;
 use unknown::Unknown;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct SmsConfig {
     #[serde(default)]
     pub enabled: bool,

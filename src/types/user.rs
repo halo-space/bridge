@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 /// 调用方提供的账号凭证记录。
 ///
 /// bridge 不保存此记录；`Users` 只负责在认证时读取它，业务范围和持久化由调用方决定。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct User {
     pub id: i64,
     pub username: String,

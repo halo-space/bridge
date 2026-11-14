@@ -2,7 +2,7 @@ use super::Identity;
 use serde::{Deserialize, Serialize};
 
 /// OAuth2 / OIDC 客户端注册信息。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct OAuthClient {
     pub client_id: String,
     #[serde(default, skip_serializing)]
@@ -16,7 +16,7 @@ pub struct OAuthClient {
 }
 
 /// 临时授权码。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct AuthCode {
     pub code: String,
     pub client_id: String,

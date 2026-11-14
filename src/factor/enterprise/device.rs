@@ -6,7 +6,7 @@ use sha2::{Digest, Sha256};
 mod issue;
 mod verify;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct DeviceProof {
     pub device_id: String,
     pub nonce: String,

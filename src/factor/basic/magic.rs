@@ -10,7 +10,7 @@ use uuid::Uuid;
 type HmacSha256 = Hmac<Sha256>;
 
 /// 邮件免密魔术链接配置
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct MagicLinkConfig {
     /// 前端消费魔术链接的基础回调地址，如 `<https://auth.halo.com/api/v1/auth/magic-callback>`。
     pub base_url: String,

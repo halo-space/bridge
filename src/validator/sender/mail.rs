@@ -22,7 +22,7 @@ fn default_from_name() -> Option<String> {
 }
 
 /// SMTP 邮件发送配置
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct SmtpConfig {
     /// 是否启用真实外网邮件发送
     #[serde(default)]

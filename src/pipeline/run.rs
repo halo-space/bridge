@@ -241,6 +241,8 @@ pub(crate) fn secret_name(name: &str) -> bool {
             | "refresh_token"
             | "verification_code"
             | "captcha_code"
+            | "state_key"
+            | "code_key"
     ) || name.ends_with("_token")
         || name.ends_with("_secret")
         || name.ends_with("_password")

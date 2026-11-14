@@ -4,7 +4,7 @@ use ldap3::{LdapConnAsync, LdapConnSettings, Scope, SearchEntry, ldap_escape};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct LdapConfig {
     pub server_url: String,
     pub base_dn: String,
@@ -81,7 +81,12 @@ impl LdapAuth {
         if entries.len() != 1 {
             return Err(Error::InvalidCredentials);
         }
-        let entry = SearchEntry::construct(entries.into_iter().next().unwrap());
+        let entry = SearchEntry::construct(
+            entries
+                .into_iter()
+                .next()
+                .ok_or(Error::InvalidCredentials)?,
+        );
         let user_dn = entry.dn.clone();
         ldap.simple_bind(&user_dn, password)
             .await

@@ -58,7 +58,7 @@ where
         Ok(pass(json!({
             "channel": channel,
             "target": target,
-            "key": key,
+            "code_key": key,
             "scene": scene,
             "ttl": self.code_ttl,
         })))

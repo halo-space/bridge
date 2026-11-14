@@ -131,6 +131,7 @@ impl Token {
         if subject.trim().is_empty() {
             return Err(Error::TokenError("Token subject cannot be empty".into()));
         }
+        let custom_claims = validate_custom(custom_claims)?;
         let now = Utc::now().timestamp();
         let username = username.unwrap_or(subject).to_string();
 
@@ -146,7 +147,7 @@ impl Token {
             jti: uuid::Uuid::new_v4().to_string(),
             username: username.clone(),
             scope: scope.clone(),
-            custom: custom_claims.unwrap_or_default(),
+            custom: custom_claims,
         };
 
         // 2. Refresh Token
@@ -409,4 +410,27 @@ impl Token {
             (None, None) => Ok(()),
         }
     }
+}
+
+fn validate_custom(
+    claims: Option<serde_json::Map<String, serde_json::Value>>,
+) -> Result<serde_json::Map<String, serde_json::Value>> {
+    let claims = claims.unwrap_or_default();
+    for key in claims.keys() {
+        if matches!(
+            key.as_str(),
+            "kind" | "sub" | "iss" | "aud" | "exp" | "iat" | "nbf" | "jti" | "username" | "scope"
+        ) {
+            return Err(Error::TokenError(format!(
+                "Custom claim uses a reserved name: {key}"
+            )));
+        }
+    }
+    let size = serde_json::to_vec(&claims)
+        .map_err(|error| Error::TokenError(format!("Invalid custom claims: {error}")))?
+        .len();
+    if size > 16 * 1024 {
+        return Err(Error::TokenError("Custom claims are too large".into()));
+    }
+    Ok(claims)
 }
