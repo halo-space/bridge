@@ -39,6 +39,36 @@ pub struct Run {
     pub effects: BTreeMap<String, Effect>,
 }
 
+impl Run {
+    /// 清理运行状态中的短期认证材料，便于调用方保存剩余流程。
+    ///
+    /// 调用方应先把当前节点需要返回给浏览器或用户的内容保存到自己的
+    /// 短期存储，再调用此方法。下一次提交输入时，调用方需要把被清理的
+    /// `state`、验证码答案或其他材料重新放入输入数据。
+    pub fn clear(&mut self) {
+        for value in self.context.data.values_mut() {
+            let current = std::mem::replace(value, Value::Null);
+            *value = clean(current);
+        }
+        self.context.request = clean(std::mem::take(&mut self.context.request));
+        self.context.meta.retain(|key, _| !secret_name(key));
+        for value in self.context.meta.values_mut() {
+            let current = std::mem::replace(value, Value::Null);
+            *value = clean(current);
+        }
+        for item in &mut self.context.evidence {
+            item.data = clean(std::mem::replace(&mut item.data, Value::Null));
+        }
+        for value in self.payloads.values_mut() {
+            let current = std::mem::replace(value, Value::Null);
+            *value = clean(current);
+        }
+        for effect in self.effects.values_mut() {
+            effect.data = clean(std::mem::replace(&mut effect.data, Value::Null));
+        }
+    }
+}
+
 #[derive(Serialize)]
 struct RunWire<'a> {
     run_id: &'a String,
@@ -66,11 +96,7 @@ impl Serialize for Run {
     where
         S: serde::Serializer,
     {
-        if self
-            .context
-            .data
-            .iter()
-            .any(|(key, value)| secret_name(key) || contains_secret(value))
+        if self.context.data.values().any(contains_secret)
             || contains_secret(&self.context.request)
             || self
                 .context
@@ -182,7 +208,19 @@ pub(crate) fn secret_name(name: &str) -> bool {
             | "signature"
             | "state"
             | "nonce"
-            | "input"
+            | "answer"
+            | "text"
+            | "challenge"
+            | "otp"
+            | "proof"
+            | "offset_x"
+            | "angle"
+            | "points"
+            | "client_data_json"
+            | "authenticator_data"
+            | "user_handle"
+            | "attestation_object"
+            | "assertion"
             | "password_hash"
             | "client_secret"
             | "access_token"

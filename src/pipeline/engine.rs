@@ -4,6 +4,7 @@ use crate::error::{Error, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 const DEFAULT_MAX_STEPS: u32 = 128;
@@ -170,9 +171,22 @@ impl Pipeline {
     }
 
     pub fn resume(&self, run: &mut Run, event: Event) -> Result<Progress> {
+        if matches!(event, Event::Input { .. }) {
+            self.apply(run, event)
+        } else {
+            Err(Error::AuthFailed(
+                "Pipeline pass/fail results must come from a Runner".into(),
+            ))
+        }
+    }
+
+    fn apply(&self, run: &mut Run, event: Event) -> Result<Progress> {
         self.validate()?;
         if run.pipeline_version != self.config_version || run.pipeline_hash != self.config_hash {
             return Err(Error::AuthFailed("Pipeline version mismatch".into()));
+        }
+        if let Some((node, reason)) = run.denied.clone() {
+            return Ok(Progress::Deny { node, reason });
         }
         let Some(current) = run.current.clone() else {
             return self.advance(run);
@@ -181,14 +195,6 @@ impl Pipeline {
             .nodes
             .get(&current)
             .ok_or_else(|| Error::Internal(format!("Pipeline node not found: {current}")))?;
-        run.steps = run.steps.saturating_add(1);
-        if run.steps > self.max_steps {
-            return Ok(Progress::Deny {
-                node: current,
-                reason: "Pipeline step limit exceeded".into(),
-            });
-        }
-
         match event {
             Event::Input {
                 node: event_node,
@@ -200,6 +206,18 @@ impl Pipeline {
                     return Err(Error::AuthFailed(format!(
                         "Pipeline node does not accept input: {current}"
                     )));
+                }
+                if matches!(node.kind, Kind::Input) {
+                    validate_input(&node.fields, &data)?;
+                }
+                run.steps = run.steps.saturating_add(1);
+                if run.steps > self.max_steps {
+                    run.denied = Some((current.clone(), "Pipeline step limit exceeded".into()));
+                    run.current = None;
+                    return Ok(Progress::Deny {
+                        node: current,
+                        reason: "Pipeline step limit exceeded".into(),
+                    });
                 }
                 run.context.data.insert(current.clone(), data.clone());
                 run.context.evidence.push(Evidence {
@@ -239,6 +257,13 @@ impl Pipeline {
                     }
                     self.arrive(run, &current, &target, false)?;
                 }
+                clear_completed(
+                    self,
+                    &mut run.context,
+                    &mut run.payloads,
+                    &run.completed,
+                    None,
+                );
                 self.advance(run)
             }
             Event::Pass {
@@ -249,6 +274,15 @@ impl Pipeline {
                 at,
             } => {
                 self.check_node(&current, &event_node)?;
+                run.steps = run.steps.saturating_add(1);
+                if run.steps > self.max_steps {
+                    run.denied = Some((current.clone(), "Pipeline step limit exceeded".into()));
+                    run.current = None;
+                    return Ok(Progress::Deny {
+                        node: current,
+                        reason: "Pipeline step limit exceeded".into(),
+                    });
+                }
                 let targets = self.targets(node, &routes)?;
                 let effect_identity = identity.clone();
                 if let Some(identity) = identity {
@@ -256,6 +290,8 @@ impl Pipeline {
                         if existing.provider != identity.provider
                             || existing.subject != identity.subject
                         {
+                            run.denied = Some((current.clone(), "Identity mismatch".into()));
+                            run.current = None;
                             return Ok(Progress::Deny {
                                 node: current,
                                 reason: "Identity mismatch".into(),
@@ -266,7 +302,7 @@ impl Pipeline {
                     }
                 }
                 let safe = clean(data.clone());
-                run.context.data.insert(current.clone(), safe.clone());
+                run.context.data.insert(current.clone(), data.clone());
                 run.context.evidence.push(Evidence {
                     node: current.clone(),
                     at,
@@ -291,11 +327,19 @@ impl Pipeline {
                 run.current = None;
                 for target in targets {
                     let inherited = run.payloads.get(&current).cloned();
-                    let payload = clean(merge_data(inherited.map(clean), safe.clone()));
+                    let payload = merge_data(inherited.map(clean), data.clone());
                     run.payloads.insert(target.clone(), payload.clone());
                     run.context.data.insert(target.clone(), payload);
                     self.arrive(run, &current, &target, false)?;
                 }
+                let preserve = matches!(node.kind, Kind::Issue(_)).then_some(current.as_str());
+                clear_completed(
+                    self,
+                    &mut run.context,
+                    &mut run.payloads,
+                    &run.completed,
+                    preserve,
+                );
                 self.advance(run)
             }
             Event::Fail {
@@ -304,14 +348,35 @@ impl Pipeline {
                 retry,
             } => {
                 self.check_node(&current, &event_node)?;
+                run.steps = run.steps.saturating_add(1);
+                if run.steps > self.max_steps {
+                    run.denied = Some((current.clone(), "Pipeline step limit exceeded".into()));
+                    run.current = None;
+                    return Ok(Progress::Deny {
+                        node: current,
+                        reason: "Pipeline step limit exceeded".into(),
+                    });
+                }
                 run.submitted.remove(&current);
                 if retry {
+                    if matches!(node.kind, Kind::Verify(_)) {
+                        run.context.data.remove(&current);
+                        run.payloads.remove(&current);
+                        clear_completed(
+                            self,
+                            &mut run.context,
+                            &mut run.payloads,
+                            &run.completed,
+                            None,
+                        );
+                    }
                     let visits = run.visits.entry(current.clone()).or_default();
                     *visits = visits.saturating_add(1);
                     if let Some(limit) = node.limit
                         && *visits > limit.max(1)
                     {
                         run.denied = Some((current.clone(), "Pipeline node limit exceeded".into()));
+                        run.current = None;
                         return Ok(Progress::Deny {
                             node: current,
                             reason: "Pipeline node limit exceeded".into(),
@@ -329,6 +394,7 @@ impl Pipeline {
                 run.current = None;
                 let targets = self.targets(node, &[])?;
                 if targets.is_empty() {
+                    run.denied = Some((current.clone(), reason.clone()));
                     return Ok(Progress::Deny {
                         node: current,
                         reason,
@@ -337,6 +403,13 @@ impl Pipeline {
                 for target in targets {
                     self.arrive(run, &current, &target, true)?;
                 }
+                clear_completed(
+                    self,
+                    &mut run.context,
+                    &mut run.payloads,
+                    &run.completed,
+                    None,
+                );
                 self.advance(run)
             }
         }
@@ -356,10 +429,11 @@ impl Pipeline {
             return Err(Error::Unsupported(node.id.to_string()));
         }
         let effect_key = node.idempotency.clone().unwrap_or_else(|| node_id.clone());
-        if (node.once || node.idempotency.is_some())
+        if matches!(node.kind, Kind::Effect(_))
+            && (node.once || node.idempotency.is_some())
             && let Some(effect) = run.effects.get(&effect_key).cloned()
         {
-            return self.resume(
+            return self.apply(
                 run,
                 Event::Pass {
                     node: node_id,
@@ -373,7 +447,44 @@ impl Pipeline {
         let attempts = run.attempts.entry(node_id.clone()).or_default();
         *attempts = attempts.saturating_add(1);
         let attempt = *attempts;
-        let output = runner.run(node, &run.context).await?;
+        let evidence = self.evidence(run, &node_id);
+        let context = run
+            .context
+            .view(&node_id, run.payloads.get(&node_id), &evidence);
+        let started = Instant::now();
+        let output = match runner.run(node, &context).await {
+            Ok(output) => output,
+            Err(error) => return self.runner_error(run, &node_id, node, attempt, error),
+        };
+        if let Some(timeout) = node.timeout
+            && started.elapsed() > Duration::from_secs(timeout)
+        {
+            let reason = "Pipeline node timeout".to_string();
+            let attempt = *run.attempts.get(&node_id).unwrap_or(&1);
+            if attempt <= node.retries {
+                if matches!(node.kind, Kind::Verify(_)) {
+                    run.context.data.remove(&node_id);
+                    run.payloads.remove(&node_id);
+                    clear_completed(
+                        self,
+                        &mut run.context,
+                        &mut run.payloads,
+                        &run.completed,
+                        None,
+                    );
+                }
+                return Ok(Progress::Retry {
+                    node: node_id,
+                    reason,
+                });
+            }
+            run.denied = Some((node_id.clone(), reason.clone()));
+            run.current = None;
+            return Ok(Progress::Deny {
+                node: node_id,
+                reason,
+            });
+        }
         let event = match output {
             Output::Pass {
                 routes,
@@ -393,7 +504,7 @@ impl Pipeline {
                 retry: retry && attempt <= node.retries,
             },
         };
-        self.resume(run, event)
+        self.apply(run, event)
     }
 
     /// 使用调用方提供的原子副作用存储执行节点。
@@ -421,11 +532,12 @@ impl Pipeline {
             .idempotency
             .clone()
             .unwrap_or_else(|| format!("{}:{}", run.run_id, node_id));
-        let guarded = node.once || node.idempotency.is_some();
+        let guarded =
+            matches!(node.kind, Kind::Effect(_)) && (node.once || node.idempotency.is_some());
         if guarded {
             match effects.begin(&key).await? {
                 Claim::Done(effect) => {
-                    return self.resume(
+                    return self.apply(
                         run,
                         Event::Pass {
                             node: node_id,
@@ -436,6 +548,12 @@ impl Pipeline {
                         },
                     );
                 }
+                Claim::Busy => {
+                    return Ok(Progress::Retry {
+                        node: node_id,
+                        reason: "Pipeline effect is running in another process".into(),
+                    });
+                }
                 Claim::New => {}
             }
         }
@@ -443,15 +561,41 @@ impl Pipeline {
         let attempts = run.attempts.entry(node_id.clone()).or_default();
         *attempts = attempts.saturating_add(1);
         let attempt = *attempts;
-        let output = match runner.run(node, &run.context).await {
+        let evidence = self.evidence(run, &node_id);
+        let context = run
+            .context
+            .view(&node_id, run.payloads.get(&node_id), &evidence);
+        let started = Instant::now();
+        let output = match runner.run(node, &context).await {
             Ok(output) => output,
             Err(error) => {
                 if guarded {
                     effects.cancel(&key).await?;
                 }
-                return Err(error);
+                return self.runner_error(run, &node_id, node, attempt, error);
             }
         };
+        if let Some(timeout) = node.timeout
+            && started.elapsed() > Duration::from_secs(timeout)
+        {
+            if guarded {
+                effects.cancel(&key).await?;
+            }
+            let reason = "Pipeline node timeout".to_string();
+            let attempt = *run.attempts.get(&node_id).unwrap_or(&1);
+            if attempt <= node.retries {
+                return Ok(Progress::Retry {
+                    node: node_id,
+                    reason,
+                });
+            }
+            run.denied = Some((node_id.clone(), reason.clone()));
+            run.current = None;
+            return Ok(Progress::Deny {
+                node: node_id,
+                reason,
+            });
+        }
         let event = match output {
             Output::Pass {
                 routes,
@@ -490,7 +634,44 @@ impl Pipeline {
                 }
             }
         };
-        self.resume(run, event)
+        self.apply(run, event)
+    }
+
+    fn runner_error(
+        &self,
+        run: &mut Run,
+        node_id: &str,
+        node: &Node,
+        attempt: u32,
+        error: Error,
+    ) -> Result<Progress> {
+        if !retryable(&error) {
+            return Err(error);
+        }
+        let reason = error.to_string();
+        if attempt <= node.retries {
+            if matches!(node.kind, Kind::Verify(_)) {
+                run.context.data.remove(node_id);
+                run.payloads.remove(node_id);
+                clear_completed(
+                    self,
+                    &mut run.context,
+                    &mut run.payloads,
+                    &run.completed,
+                    None,
+                );
+            }
+            return Ok(Progress::Retry {
+                node: node_id.to_string(),
+                reason,
+            });
+        }
+        run.denied = Some((node_id.to_string(), reason.clone()));
+        run.current = None;
+        Ok(Progress::Deny {
+            node: node_id.to_string(),
+            reason,
+        })
     }
 
     /// 自动推进所有可以由执行器处理的节点。
@@ -499,6 +680,9 @@ impl Pipeline {
     /// `Check`、`Issue`、`Effect` 以及已经收到输入的 `Verify` 节点会继续执行。
     pub async fn run<R: Runner>(&self, run: &mut Run, runner: &R) -> Result<Progress> {
         loop {
+            if let Some((node, reason)) = run.denied.clone() {
+                return Ok(Progress::Deny { node, reason });
+            }
             let Some(current) = run.current.clone() else {
                 return self.advance(run);
             };
@@ -536,6 +720,9 @@ impl Pipeline {
         effects: &E,
     ) -> Result<Progress> {
         loop {
+            if let Some((node, reason)) = run.denied.clone() {
+                return Ok(Progress::Deny { node, reason });
+            }
             let Some(current) = run.current.clone() else {
                 return self.advance(run);
             };
@@ -581,9 +768,12 @@ impl Pipeline {
             return Ok(self.need(&node_id));
         }
         if self.has_waiting_join(run) {
+            let reason = "Pipeline has no executable branch".to_string();
+            run.denied = Some((self.start.clone(), reason.clone()));
+            run.current = None;
             return Ok(Progress::Deny {
                 node: self.start.clone(),
-                reason: "Pipeline has no executable branch".into(),
+                reason,
             });
         }
         Ok(Progress::Done)
@@ -737,6 +927,27 @@ impl Pipeline {
             .collect()
     }
 
+    fn evidence(&self, run: &Run, node_id: &str) -> Vec<Evidence> {
+        let mut allowed = BTreeSet::new();
+        let mut pending = vec![node_id.to_string()];
+        while let Some(node) = pending.pop() {
+            if !allowed.insert(node.clone()) {
+                continue;
+            }
+            for source in self.incoming(&node) {
+                if run.activated.contains(&source) {
+                    pending.push(source);
+                }
+            }
+        }
+        run.context
+            .evidence
+            .iter()
+            .filter(|item| allowed.contains(&item.node))
+            .cloned()
+            .collect()
+    }
+
     fn check_node(&self, expected: &str, actual: &str) -> Result<()> {
         if expected == actual {
             Ok(())
@@ -800,6 +1011,62 @@ fn merge_data(previous: Option<Value>, current: Value) -> Value {
     }
 }
 
+fn clear_completed(
+    pipeline: &Pipeline,
+    context: &mut Context,
+    payloads: &mut BTreeMap<String, Value>,
+    completed: &BTreeSet<String>,
+    preserve: Option<&str>,
+) {
+    for node in completed {
+        if preserve == Some(node.as_str())
+            && pipeline
+                .nodes
+                .get(node)
+                .is_some_and(|item| matches!(item.kind, Kind::Issue(_)))
+        {
+            continue;
+        }
+        if let Some(value) = context.data.get_mut(node) {
+            let current = std::mem::replace(value, Value::Null);
+            *value = clean(current);
+        }
+        if let Some(value) = payloads.get_mut(node) {
+            let current = std::mem::replace(value, Value::Null);
+            *value = clean(current);
+        }
+    }
+}
+
+fn validate_input(fields: &[String], data: &Value) -> Result<()> {
+    if fields.is_empty() {
+        return Ok(());
+    }
+    let object = data
+        .as_object()
+        .ok_or_else(|| Error::AuthFailed("Pipeline input must be an object".into()))?;
+    for field in fields {
+        if object.get(field).is_none_or(Value::is_null) {
+            return Err(Error::AuthFailed(format!(
+                "Pipeline input is missing field: {field}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn retryable(error: &Error) -> bool {
+    matches!(
+        error,
+        Error::StoreError(_)
+            | Error::OAuthError(_)
+            | Error::LdapError(_)
+            | Error::EmailFailed(_)
+            | Error::SmsFailed(_)
+            | Error::SyncError(_)
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -838,7 +1105,7 @@ mod tests {
             "totp",
             "audit",
         ] {
-            let progress = pipeline.resume(&mut run, pass(node, &[])).unwrap();
+            let progress = pipeline.apply(&mut run, pass(node, &[])).unwrap();
             if node == "audit" {
                 assert_eq!(progress, Progress::Done);
             }
@@ -859,11 +1126,11 @@ mod tests {
         );
         let (mut run, _) = pipeline.start(Context::default()).unwrap();
         assert!(matches!(
-            pipeline.resume(&mut run, pass("password", &["risk"])).unwrap(),
+            pipeline.apply(&mut run, pass("password", &["risk"])).unwrap(),
             Progress::Need { ref node, .. } if node == "totp"
         ));
         assert!(matches!(
-            pipeline.resume(&mut run, pass("totp", &[])).unwrap(),
+            pipeline.apply(&mut run, pass("totp", &[])).unwrap(),
             Progress::Need { ref node, .. } if node == "audit"
         ));
     }
@@ -883,15 +1150,15 @@ mod tests {
         );
         let (mut run, _) = all.start(Context::default()).unwrap();
         assert!(matches!(
-            all.resume(&mut run, pass("start", &["a", "b"])).unwrap(),
+            all.apply(&mut run, pass("start", &["a", "b"])).unwrap(),
             Progress::Need { ref node, .. } if node == "a"
         ));
         assert!(matches!(
-            all.resume(&mut run, pass("a", &[])).unwrap(),
+            all.apply(&mut run, pass("a", &[])).unwrap(),
             Progress::Need { ref node, .. } if node == "b"
         ));
         assert!(matches!(
-            all.resume(&mut run, pass("b", &[])).unwrap(),
+            all.apply(&mut run, pass("b", &[])).unwrap(),
             Progress::Need { ref node, .. } if node == "join"
         ));
 
@@ -907,9 +1174,9 @@ mod tests {
             ],
         );
         let (mut run, _) = any.start(Context::default()).unwrap();
-        any.resume(&mut run, pass("start", &["a", "b"])).unwrap();
+        any.apply(&mut run, pass("start", &["a", "b"])).unwrap();
         assert!(matches!(
-            any.resume(&mut run, pass("a", &[])).unwrap(),
+            any.apply(&mut run, pass("a", &[])).unwrap(),
             Progress::Need { ref node, .. } if node == "join"
         ));
     }
@@ -928,9 +1195,9 @@ mod tests {
             ],
         );
         let (mut run, _) = all.start(Context::default()).unwrap();
-        all.resume(&mut run, pass("start", &["a", "b"])).unwrap();
+        all.apply(&mut run, pass("start", &["a", "b"])).unwrap();
         assert!(matches!(
-            all.resume(
+            all.apply(
                 &mut run,
                 Event::Fail {
                     node: "a".into(),
@@ -942,7 +1209,7 @@ mod tests {
             Progress::Need { ref node, .. } if node == "b"
         ));
         assert!(matches!(
-            all.resume(&mut run, pass("b", &[])).unwrap(),
+            all.apply(&mut run, pass("b", &[])).unwrap(),
             Progress::Deny { .. }
         ));
 
@@ -958,8 +1225,8 @@ mod tests {
             ],
         );
         let (mut run, _) = any.start(Context::default()).unwrap();
-        any.resume(&mut run, pass("start", &["a", "b"])).unwrap();
-        any.resume(
+        any.apply(&mut run, pass("start", &["a", "b"])).unwrap();
+        any.apply(
             &mut run,
             Event::Fail {
                 node: "a".into(),
@@ -969,7 +1236,7 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(
-            any.resume(
+            any.apply(
                 &mut run,
                 Event::Fail {
                     node: "b".into(),
@@ -996,16 +1263,16 @@ mod tests {
         let mut restored: Run = serde_json::from_str(&encoded).unwrap();
         assert!(
             pipeline
-                .resume(&mut restored, pass("start", &["missing"]))
+                .apply(&mut restored, pass("start", &["missing"]))
                 .is_err()
         );
         assert!(
             pipeline
-                .resume(&mut restored, pass("wrong", &["ok"]))
+                .apply(&mut restored, pass("wrong", &["ok"]))
                 .is_err()
         );
         assert!(matches!(
-            pipeline.resume(&mut restored, pass("start", &["ok"])).unwrap(),
+            pipeline.apply(&mut restored, pass("start", &["ok"])).unwrap(),
             Progress::Need { ref node, .. } if node == "done"
         ));
     }
@@ -1027,11 +1294,11 @@ mod tests {
                 if node == "check" && kind == "risk_score"
         ));
         assert!(matches!(
-            pipeline.resume(&mut run, pass("check", &[])).unwrap(),
+            pipeline.apply(&mut run, pass("check", &[])).unwrap(),
             Progress::Need { ref node, .. } if node == "done"
         ));
         assert!(matches!(
-            pipeline.resume(&mut run, pass("done", &[])).unwrap(),
+            pipeline.apply(&mut run, pass("done", &[])).unwrap(),
             Progress::Deny { .. }
         ));
     }
@@ -1042,7 +1309,7 @@ mod tests {
         let (mut run, _) = retry.start(Context::default()).unwrap();
         assert!(matches!(
             retry
-                .resume(
+                .apply(
                     &mut run,
                     Event::Fail {
                         node: "captcha".into(),
@@ -1065,10 +1332,10 @@ mod tests {
             ],
         );
         let (mut run, _) = cycle.start(Context::default()).unwrap();
-        let first = cycle.resume(&mut run, pass("captcha", &["retry"])).unwrap();
+        let first = cycle.apply(&mut run, pass("captcha", &["retry"])).unwrap();
         assert!(matches!(first, Progress::Need { ref node, .. } if node == "captcha"));
         assert!(matches!(
-            cycle.resume(&mut run, pass("captcha", &["retry"])).unwrap(),
+            cycle.apply(&mut run, pass("captcha", &["retry"])).unwrap(),
             Progress::Deny { .. }
         ));
     }
@@ -1095,7 +1362,7 @@ mod tests {
             })
             .unwrap();
         let progress = pipeline
-            .resume(
+            .apply(
                 &mut run,
                 Event::Pass {
                     node: "one".into(),
@@ -1107,14 +1374,83 @@ mod tests {
             )
             .unwrap();
         assert!(matches!(progress, Progress::Deny { .. }));
+        assert!(run.current.is_none());
+        assert!(matches!(
+            pipeline.resume(
+                &mut run,
+                Event::Input {
+                    node: "one".into(),
+                    data: serde_json::json!({ "code": "123456" }),
+                    at: 2,
+                },
+            ),
+            Ok(Progress::Deny { .. })
+        ));
+    }
+
+    #[test]
+    fn public_resume_accepts_input_only() {
+        let pipeline = Pipeline::new("check", vec![Node::verify("check", "password")]);
+        let (mut run, _) = pipeline.start(Context::default()).unwrap();
+        let current = run.current.clone();
+        assert!(matches!(
+            pipeline.resume(&mut run, pass("check", &[])),
+            Err(Error::AuthFailed(message)) if message.contains("must come from a Runner")
+        ));
+        assert_eq!(run.current, current);
+    }
+
+    #[test]
+    fn input_fields_are_required() {
+        let pipeline = Pipeline::new("input", vec![Node::input("input", vec!["account".into()])]);
+        let (mut run, _) = pipeline.start(Context::default()).unwrap();
+        assert!(matches!(
+            pipeline.resume(
+                &mut run,
+                Event::Input {
+                    node: "input".into(),
+                    data: serde_json::json!({}),
+                    at: 1,
+                },
+            ),
+            Err(Error::AuthFailed(message)) if message.contains("account")
+        ));
+    }
+
+    #[test]
+    fn deny_is_terminal_after_a_failed_leaf() {
+        let pipeline = Pipeline::new("check", vec![Node::verify("check", "password")]);
+        let (mut run, _) = pipeline.start(Context::default()).unwrap();
+        let denied = pipeline
+            .apply(
+                &mut run,
+                Event::Fail {
+                    node: "check".into(),
+                    reason: "invalid".into(),
+                    retry: false,
+                },
+            )
+            .unwrap();
+        assert!(matches!(denied, Progress::Deny { .. }));
+        assert!(matches!(
+            pipeline.resume(
+                &mut run,
+                Event::Input {
+                    node: "check".into(),
+                    data: serde_json::json!({ "password": "secret" }),
+                    at: 1,
+                },
+            ),
+            Ok(Progress::Deny { .. })
+        ));
     }
 
     #[test]
     fn refuses_to_serialize_pending_authentication_material() {
-        let pipeline = Pipeline::new("input", vec![Node::input("input", vec![])]);
+        let pipeline = Pipeline::new("input", vec![Node::verify("input", "password")]);
         let (mut run, _) = pipeline.start(Context::default()).unwrap();
         let _ = pipeline
-            .resume(
+            .apply(
                 &mut run,
                 Event::Input {
                     node: "input".into(),
@@ -1132,6 +1468,18 @@ mod tests {
         context
             .meta
             .insert("access_token".into(), serde_json::json!("token"));
+        let (run, _) = pipeline.start(context).unwrap();
+        assert!(serde_json::to_string(&run).is_err());
+    }
+
+    #[test]
+    fn refuses_to_serialize_protocol_challenge() {
+        let pipeline = Pipeline::new("issue", vec![Node::issue("issue", "passkey")]);
+        let mut context = Context::default();
+        context.data.insert(
+            "issue".into(),
+            serde_json::json!({"options": {"challenge": "opaque"}}),
+        );
         let (run, _) = pipeline.start(context).unwrap();
         assert!(serde_json::to_string(&run).is_err());
     }
@@ -1167,6 +1515,139 @@ mod tests {
             pipeline.execute(&mut run, &Pass).await.unwrap(),
             Progress::Done
         );
+        assert!(serde_json::to_string(&run).is_ok());
+    }
+
+    #[tokio::test]
+    async fn runner_context_redacts_request_and_meta_secrets() {
+        use std::sync::{Arc, Mutex};
+
+        let pipeline = Pipeline::new(
+            "input",
+            vec![
+                Node::input("input", vec!["phone".into()]).edge(None::<String>, "verify"),
+                Node::verify("verify", "captcha"),
+            ],
+        );
+        let seen = Arc::new(Mutex::new(None));
+        let capture = seen.clone();
+        struct Inspect(Arc<Mutex<Option<Context>>>);
+        impl Runner for Inspect {
+            async fn run(&self, _node: &Node, context: &Context) -> Result<Output> {
+                *self.0.lock().unwrap() = Some(context.clone());
+                Ok(Output::Pass {
+                    routes: Vec::new(),
+                    data: Value::Null,
+                    identity: None,
+                    at: 1,
+                })
+            }
+        }
+        let mut context = Context {
+            request: serde_json::json!({"password": "secret", "return_to": "/home"}),
+            ..Context::default()
+        };
+        context
+            .meta
+            .insert("access_token".into(), Value::String("secret".into()));
+        context
+            .meta
+            .insert("device".into(), Value::String("browser".into()));
+        let (mut run, _) = pipeline.start(context).unwrap();
+        pipeline
+            .resume(
+                &mut run,
+                Event::Input {
+                    node: "input".into(),
+                    data: serde_json::json!({"phone": "13800138000"}),
+                    at: 1,
+                },
+            )
+            .unwrap();
+        pipeline.run(&mut run, &Inspect(capture)).await.unwrap();
+        let seen = seen.lock().unwrap().clone().unwrap();
+        assert_eq!(seen.request, serde_json::json!({"return_to": "/home"}));
+        assert_eq!(
+            seen.meta.get("device"),
+            Some(&Value::String("browser".into()))
+        );
+        assert!(!seen.meta.contains_key("access_token"));
+    }
+
+    #[tokio::test]
+    async fn keeps_issue_material_until_the_next_input() {
+        let pipeline = Pipeline::new(
+            "issue",
+            vec![
+                Node::issue("issue", "passkey").edge(None::<String>, "input"),
+                Node::input("input", vec!["value".into()]),
+            ],
+        );
+        let (mut run, progress) = pipeline.start(Context::default()).unwrap();
+        assert!(matches!(progress, Progress::Need { ref node, .. } if node == "issue"));
+        struct IssuePass;
+        impl Runner for IssuePass {
+            async fn run(&self, _node: &Node, _context: &Context) -> Result<Output> {
+                Ok(Output::Pass {
+                    routes: Vec::new(),
+                    data: serde_json::json!({
+                        "options": { "challenge": "public" },
+                        "state": "secret"
+                    }),
+                    identity: None,
+                    at: 1,
+                })
+            }
+        }
+        assert!(matches!(
+            pipeline.run(&mut run, &IssuePass).await.unwrap(),
+            Progress::Need { ref node, .. } if node == "input"
+        ));
+        assert_eq!(run.context.data["issue"]["state"], "secret");
+        assert!(serde_json::to_string(&run).is_err());
+        run.clear();
+        assert!(serde_json::to_string(&run).is_ok());
+        let progress = pipeline
+            .resume(
+                &mut run,
+                Event::Input {
+                    node: "input".into(),
+                    data: serde_json::json!({ "value": "ok" }),
+                    at: 1,
+                },
+            )
+            .unwrap();
+        assert_eq!(run.context.data["issue"].get("state"), None);
+        assert_eq!(progress, Progress::Done);
+        assert!(serde_json::to_string(&run).is_ok());
+    }
+
+    #[tokio::test]
+    async fn clears_password_before_waiting_for_a_following_factor() {
+        let pipeline = Pipeline::new(
+            "password",
+            vec![
+                Node::input("password", vec!["password".into()]).edge(None::<String>, "check"),
+                Node::verify("check", "password").edge(None::<String>, "totp"),
+                Node::input("totp", vec!["code".into()]),
+            ],
+        );
+        let (mut run, _) = pipeline.start(Context::default()).unwrap();
+        pipeline
+            .resume(
+                &mut run,
+                Event::Input {
+                    node: "password".into(),
+                    data: serde_json::json!({ "password": "secret" }),
+                    at: 1,
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            pipeline.run(&mut run, &Pass).await.unwrap(),
+            Progress::Need { ref node, .. } if node == "totp"
+        ));
+        assert!(serde_json::to_string(&run).is_ok());
     }
 
     struct Unsupported;
@@ -1178,6 +1659,74 @@ mod tests {
                 node.id
             )))
         }
+    }
+
+    struct Flaky {
+        calls: std::sync::atomic::AtomicU32,
+    }
+
+    impl Runner for Flaky {
+        async fn run(&self, _node: &Node, _context: &Context) -> Result<Output> {
+            let call = self
+                .calls
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if call == 0 {
+                Err(Error::StoreError("temporary store failure".into()))
+            } else {
+                Ok(Output::Pass {
+                    routes: Vec::new(),
+                    data: Value::Null,
+                    identity: None,
+                    at: 1,
+                })
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn retries_retryable_runner_errors() {
+        let pipeline = Pipeline::new("effect", vec![Node::effect("effect", "audit").retries(1)]);
+        let (mut run, _) = pipeline.start(Context::default()).unwrap();
+        let runner = Flaky {
+            calls: std::sync::atomic::AtomicU32::new(0),
+        };
+        assert!(matches!(
+            pipeline.run(&mut run, &runner).await.unwrap(),
+            Progress::Retry { ref node, .. } if node == "effect"
+        ));
+        assert_eq!(
+            pipeline.run(&mut run, &runner).await.unwrap(),
+            Progress::Done
+        );
+    }
+
+    struct BusyEffects;
+
+    impl Effects for BusyEffects {
+        async fn begin(&self, _key: &str) -> Result<Claim> {
+            Ok(Claim::Busy)
+        }
+
+        async fn complete(&self, _key: &str, _effect: Effect) -> Result<()> {
+            Ok(())
+        }
+
+        async fn cancel(&self, _key: &str) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn waits_for_a_running_effect() {
+        let pipeline = Pipeline::new("audit", vec![Node::effect("audit", "audit").once(true)]);
+        let (mut run, _) = pipeline.start(Context::default()).unwrap();
+        assert!(matches!(
+            pipeline
+                .execute_with(&mut run, &Pass, &BusyEffects)
+                .await
+                .unwrap(),
+            Progress::Retry { ref node, .. } if node == "audit"
+        ));
     }
 
     struct Custom;

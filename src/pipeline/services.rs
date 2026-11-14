@@ -238,17 +238,14 @@ where
     fn supports(&self, node: &Node) -> bool {
         match &node.kind {
             Kind::Input => true,
-            Kind::Check(_) | Kind::Issue(_) | Kind::Verify(_) | Kind::Effect(_) => {
-                self.table.get(&node.kind).is_some_and(|handler| {
-                    !matches!(handler, Handler::Issue | Handler::Verify)
-                        || (self.passkey_issue.is_some() && self.passkey_verify.is_some())
-                        || !matches!(
-                            node.kind,
-                            Kind::Issue(ref code) | Kind::Verify(ref code)
-                                if matches!(code.as_str(), "passkey" | "webauthn")
-                        )
-                })
-            }
+            Kind::Check(_) | Kind::Issue(_) | Kind::Verify(_) | Kind::Effect(_) => self
+                .table
+                .get(&node.kind)
+                .is_some_and(|handler| match handler {
+                    Handler::Issue => !is_passkey(&node.kind) || self.passkey_issue.is_some(),
+                    Handler::Verify => !is_passkey(&node.kind) || self.passkey_verify.is_some(),
+                    _ => true,
+                }),
         }
     }
 
@@ -296,6 +293,13 @@ fn channel(kind: &str) -> Result<&'static str> {
             "Unsupported pipeline issuer: {kind}"
         )))
     }
+}
+
+fn is_passkey(kind: &Kind) -> bool {
+    matches!(
+        kind,
+        Kind::Issue(code) | Kind::Verify(code) if matches!(code.as_str(), "passkey" | "webauthn")
+    )
 }
 
 fn captcha_type(kind: &str) -> Result<CaptchaType> {

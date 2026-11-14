@@ -1,4 +1,4 @@
-use super::run::Effect;
+use super::run::{Effect, clean};
 use crate::error::{Error, Result};
 use crate::types::Identity;
 use serde::{Deserialize, Serialize};
@@ -155,6 +155,34 @@ pub struct Context {
     pub evidence: Vec<Evidence>,
 }
 
+impl Context {
+    /// 为当前节点创建执行视图。
+    ///
+    /// Run 内部会保留完整流程状态，但 Runner 只应看到当前节点继承到的
+    /// 数据。这样自定义 Runner 不会因为读取 Context 而混用其他分支的输入。
+    /// `request`、`meta` 和已经确认的身份仍按调用方上下文传入。
+    pub(crate) fn view(&self, node: &str, data: Option<&Value>, evidence: &[Evidence]) -> Self {
+        let mut current = Map::new();
+        if let Some(data) = data {
+            current.insert(node.to_string(), data.clone());
+        }
+        Self {
+            protocol: self.protocol.clone(),
+            connection: self.connection.clone(),
+            identity: self.identity.clone(),
+            request: clean(self.request.clone()),
+            meta: self
+                .meta
+                .iter()
+                .filter(|(key, _)| !super::run::secret_name(key))
+                .map(|(key, value)| (key.clone(), clean(value.clone())))
+                .collect(),
+            data: current,
+            evidence: evidence.to_vec(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Evidence {
     pub node: String,
@@ -210,11 +238,13 @@ pub trait Runner: Send + Sync {
 
 /// 调用方提供的副作用幂等存储。
 ///
-/// `begin` 必须由存储实现原子占用同一个 key；已有完成结果返回 `Done`，
-/// 新执行返回 `New`。这样多个进程恢复同一个 Run 时不会重复执行副作用。
+/// `begin` 必须由存储实现原子占用同一个 key。新执行返回 `New`，
+/// 已有完成结果返回 `Done`，仍在有效租约内的其他执行返回 `Busy`。
+/// `New` 对应的占用必须带过期时间，进程崩溃后才能由其他进程接管。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Claim {
     New,
+    Busy,
     Done(Effect),
 }
 

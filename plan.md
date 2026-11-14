@@ -12,6 +12,19 @@
 
 ## 当前重构批次
 
+- [x] P0：公开 `resume` 只接受调用方提交的 `Input`，通过结果只能来自 Runner
+- [x] P0：校验输入节点的必填字段并拒绝提交到错误节点
+- [x] P0：身份不一致时立即终止 Run，Runner 的可重试错误按 `retries` 计数
+- [x] P0：完成节点清理已消费的认证输入，签发节点的短期材料只保留到下一步消费
+- [x] P1：Effects 增加 `Busy` 状态和调用方租约过期边界
+- [x] P0：拒绝结果写入 Run，后续调用不能从终止状态继续推进
+- [x] P0：Runner 只收到当前节点和当前路径的输入与证据
+- [x] P0：增加 `Run::clear`，支持调用方外置短期材料后保存暂停状态
+- [x] P1：恢复码校验改为只校验并返回匹配值，单次删除由调用方原子完成
+- [x] P1：Token 撤销键只保存摘要，不把完整 Token 写入调用方存储键
+- [x] P1：SAML `check` 和 `check_state` 强制要求调用方提供原子重放缓存
+- [x] P1：验证码失败次数只允许使用 `Secrets::incr` 原子递增
+
 - [x] P0：隔离 Run 的短期认证输入，清理完成节点的敏感数据。
 - [x] P0：移除固定 Magic Link 密钥，未知通知供应商显式报错。
 - [x] P1：拆分 Pipeline 模型、状态和执行引擎。
@@ -63,7 +76,7 @@
 - [x] 增加 SP 发起流程状态关联
 - [x] 明确重复使用记录的接口和失败策略
 
-验收条件是签名、签发方、接收方、时间窗口、状态关联和重复使用防护都有失败测试。`SamlAuth::start` 返回流程编号，`check_state` 强制关联流程编号和重复使用记录。
+验收条件是签名、签发方、接收方、时间窗口、状态关联和重复使用防护都有失败测试。`SamlAuth::start` 返回流程编号，`check` 和 `check_state` 都强制使用调用方的重复使用记录，`check_state` 还会关联流程编号。
 
 ## 阶段三：Pipeline 编排
 
@@ -174,9 +187,9 @@
 - [x] Pipeline present 检查只读取当前节点 payload
 - [x] Token、RSA、通知门面和社交静态包装完成命名收口
 
-`Cards::schema()` 现在导出 JSON Schema、能力码和每个 Card 的参数 Schema。Pipeline 会拒绝重复节点、重复 route、空能力码、错误参数类型、未知参数、非法 Secret 引用和未限制的任意子图回边。`Effects` 提供跨进程幂等所需的原子 begin/complete/cancel 契约；bridge 不选择具体数据库或缓存。`retries` 由 Pipeline 记录每个节点实际交给 Runner 的次数并执行上限，`timeout` 由调用方的异步运行时负责中断，bridge 不绑定具体 runtime。
+`Cards::schema()` 现在导出 JSON Schema、能力码和每个 Card 的参数 Schema。Pipeline 会拒绝重复节点、重复 route、空能力码、错误参数类型、未知参数、非法 Secret 引用和未限制的任意子图回边。`Effects` 提供跨进程幂等所需的原子 begin/complete/cancel 契约，并用 `Busy` 表示其他进程持有租约；bridge 不选择具体数据库或缓存。`retries` 由 Pipeline 记录每个节点实际交给 Runner 的次数并执行上限，`timeout` 在 Runner 返回后检查耗时，真正的任务中断由调用方异步运行时负责，bridge 不绑定具体 runtime。
 
-结论：`verify_token` 只做签名和 Claims 校验；需要实时状态的请求统一使用 `verify_live`。Refresh Token 换发通过 `Users` 检查用户存在和 `is_active`，业务命名空间、租户关系和用户数据由调用方管理。RSA 必须由调用方显式创建或使用 `from_private_pem` 加载持久化密钥，`private_key_pem` 导出，`rotate` 显式轮换；不提供全局密钥或原始值回退。短信和邮件 sender 的 `strict` 模式用于生产失败闭环，关闭时保留开发 Mock 行为。Events 使用 `event.id` 幂等，并支持 trace/request 字段；写入失败由存储实现返回错误。
+结论：`verify_token` 只做签名和 Claims 校验；需要实时状态的请求统一使用 `verify_live`。Refresh Token 换发通过 `Users` 检查用户存在和 `is_active`，业务命名空间、租户关系和用户数据由调用方管理。撤销键使用 Token 摘要，避免完整凭证进入存储键名。RSA 必须由调用方显式创建或使用 `from_private_pem` 加载持久化密钥，`private_key_pem` 导出，`rotate` 显式轮换；不提供全局密钥或原始值回退。短信和邮件 sender 的 `strict` 模式用于生产失败闭环，关闭时保留开发 Mock 行为。Events 使用 `event.id` 幂等，并支持 trace/request 字段；写入失败由存储实现返回错误。SAML 必须通过带重放缓存的校验入口，缓存由调用方提供。
 
 ## 调用方负责业务范围
 

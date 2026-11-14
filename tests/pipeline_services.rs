@@ -6,6 +6,7 @@ use halo::bridge::{Error, Events, TotpBinding, User};
 use halo::bridge::{SmsConfig, SmsSender, SmtpConfig, SmtpSender};
 use halo::factor::passkey::Passkey;
 use halo::pkg::totp::Totp;
+use halo::validator::issuer::Code;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -49,6 +50,17 @@ impl Secrets for Mem {
     async fn del(&self, key: &str) -> halo::Result<()> {
         self.values.lock().unwrap().remove(key);
         Ok(())
+    }
+
+    async fn incr(&self, key: &str, _ttl: u64) -> halo::Result<u32> {
+        let mut values = self.values.lock().unwrap();
+        let next = values
+            .get(key)
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap_or(0)
+            .saturating_add(1);
+        values.insert(key.to_string(), next.to_string());
+        Ok(next)
     }
 }
 
@@ -215,7 +227,7 @@ async fn pipeline_runs_captcha_sms_and_audit_without_node_dispatch_in_app() {
         vec![
             Node::input("phone", vec!["phone".into()]).edge(None::<String>, "captcha_issue"),
             Node::issue("captcha_issue", "captcha.slider").edge(None::<String>, "captcha"),
-            Node::input("captcha", vec!["captcha".into()]).edge(None::<String>, "captcha_verify"),
+            Node::input("captcha", vec!["id".into()]).edge(None::<String>, "captcha_verify"),
             Node::verify("captcha_verify", "captcha.slider")
                 .edge(None::<String>, "issue")
                 .limit(3),
@@ -281,7 +293,7 @@ async fn pipeline_runs_captcha_sms_and_audit_without_node_dispatch_in_app() {
     assert!(matches!(progress, Progress::Need { ref node, .. } if node == "code"));
 
     let code = secrets
-        .get_sync("code:signin:13800138000")
+        .get_sync(&Code::key("signin", "13800138000"))
         .expect("pipeline issued a code");
     let progress = pipeline
         .resume(

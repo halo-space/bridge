@@ -188,7 +188,7 @@ impl Token {
 
     pub async fn verify_live<K: Secrets>(&self, kv: &K, token: &str) -> Result<Claims> {
         let claims = self.verify_token(token)?;
-        if kv.get(&format!("token:revoked:{token}")).await?.is_some() {
+        if kv.get(&crate::token::revoke_key(token)).await?.is_some() {
             return Err(Error::TokenError("Token revoked".into()));
         }
         Ok(claims)

@@ -5,7 +5,7 @@ use crate::pkg::recovery::RecoveryCode;
 pub struct Recovery;
 
 impl Recovery {
-    pub fn check(code: &str, hashes: &[String]) -> Result<String> {
-        RecoveryCode::verify_and_consume(code, hashes)
+    pub fn verify(code: &str, hashes: &[String]) -> Result<String> {
+        RecoveryCode::verify(code, hashes)
     }
 }

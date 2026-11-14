@@ -32,8 +32,11 @@ impl RecoveryCode {
         format!("{:x}", hasher.finalize())
     }
 
-    /// 核验恢复码是否匹配存储哈希列表，成功匹配返回被消费的哈希值
-    pub fn verify_and_consume(raw_code: &str, stored_hashes: &[String]) -> Result<String> {
+    /// 核验恢复码是否匹配存储哈希列表，成功返回匹配的哈希值。
+    ///
+    /// 哈希列表由调用方保存。调用方应在自己的原子更新中删除返回值，
+    /// 这样同一个恢复码才只能成功一次。
+    pub fn verify(raw_code: &str, stored_hashes: &[String]) -> Result<String> {
         let input_hash = Self::hash_code(raw_code);
         if let Some(matched) = stored_hashes.iter().find(|&h| h == &input_hash) {
             Ok(matched.clone())

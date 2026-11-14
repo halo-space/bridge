@@ -58,7 +58,7 @@ src/
 
 ## 核心边界
 
-`factor` 表示一种完整的登录方式，例如密码登录或 GitHub 登录。`validator` 负责登录过程中会短时间使用的安全信息，例如验证码、TOTP 校验结果、Passkey 浏览器验证请求和 Magic Link。`pkg` 放密码、RSA、TOTP 等底层算法。`token` 负责签发和校验登录后的 Token。`store` 只规定调用方需要提供哪些读写接口。
+`factor` 表示一种完整的登录方式，例如密码登录或 GitHub 登录。`validator` 负责登录过程中会短时间使用的安全信息，例如验证码、TOTP 校验结果、Passkey 浏览器验证请求和 Magic Link。`pkg` 放密码、RSA、TOTP 等底层算法。`token` 负责签发和校验登录后的 Token。`store` 只规定调用方需要提供哪些读写接口。验证码失败次数依赖 `Secrets::incr` 的原子递增，存储不支持时验证码校验会返回错误。
 
 `state`、`nonce` 和 PKCE 是 OAuth/OIDC 登录过程中防伪造和防重复使用的参数，放在 `factor/oidc`，不属于普通验证码模块。
 
@@ -76,7 +76,7 @@ Bridge 不保存业务用户，也不执行账号绑定。Provider 只把第三�
 | 恢复码和 Magic Link | 已实现 | `validator` 和 `factor/basic/magic` |
 | GitHub、飞书、Google、微信 | 已实现 | 授权地址、授权码交换、资料转换 |
 | LDAP | 已实现 | 服务账号绑定、用户搜索、密码绑定、Identity 输出 |
-| SAML | 已实现 | 企业单点登录、签名检查、时间检查和防重复使用 |
+| SAML | 已实现 | 企业单点登录、签名检查、时间检查和防重复使用；校验时需要调用方提供原子重放缓存 |
 | 企业微信、钉钉 | 已实现 | 授权码交换和 Identity 输出 |
 | OIDC Authorization Code | 已实现 | OAuth/OIDC 授权码、PKCE、state、nonce、刷新和撤销 |
 | UserInfo、Introspection、隐式授权 | 边界已确定 | Bridge 不维护业务用户；应用层可以用 Token 校验结果自行返回用户信息；只支持授权码 + PKCE |

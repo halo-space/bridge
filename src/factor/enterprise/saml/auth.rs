@@ -60,12 +60,8 @@ impl SamlAuth {
         })
     }
 
-    pub fn check(&self, response: &[u8], now: SystemTime) -> Result<SamlAssertion> {
-        self.check_inner(response, now, None, None)
-    }
-
     /// 校验 SAML 响应并使用调用方提供的原子重放缓存。
-    pub fn check_with(
+    pub fn check(
         &self,
         response: &[u8],
         now: SystemTime,
@@ -167,7 +163,12 @@ impl SamlAuth {
         })
     }
 
-    pub fn identity(&self, response: &[u8], now: SystemTime) -> Result<Identity> {
-        Ok(self.check(response, now)?.identity())
+    pub fn identity(
+        &self,
+        response: &[u8],
+        now: SystemTime,
+        replay_cache: &dyn ReplayCache,
+    ) -> Result<Identity> {
+        Ok(self.check(response, now, replay_cache)?.identity())
     }
 }

@@ -121,7 +121,7 @@ pub trait Limits {}   // 发送和校验频控
 - 用户是否存在、是否启用、是否被锁定。
 - Passkey 计数器条件更新和 Device 一次性编号的单次消费。
 
-验证码高并发失败计数可以在 `Secrets::incr` 中接入 Redis 原子递增；如果存储不支持，bridge 会使用兼容读写路径，但生产环境应提供原子实现。
+验证码失败次数必须通过 `Secrets::incr` 原子递增。存储不支持该操作时，验证码校验会返回错误，调用方应接入 Redis、数据库原子计数或自己的等价实现。
 
 ### 第二步：创建 Cards
 
@@ -333,6 +333,8 @@ let (mut run, progress) = pipeline.start(context)?;
 
 `Context` 是本次认证的请求上下文。`protocol` 和 `connection` 是调用方传入的业务信息；`start` 会创建短期 `Run`，并返回当前需要处理的第一个节点。
 
+Runner 收到的 `Context` 只包含当前节点沿流程继承的数据，不会把其他并行分支的输入一起传入。`request` 和 `meta` 也会先清理已知敏感字段。完整的流程记录仍保存在 `Run` 中，调用方不要把 `Context` 当作业务用户对象或 Session。
+
 `Progress::Need` 表示当前节点需要调用方提供输入或执行器继续执行：
 
 ```rust
@@ -372,6 +374,10 @@ let progress = pipeline.run(&mut run, &runner).await?;
 
 第一段 `resume` 把账号密码交给当前 `input` 节点；第二段 `run` 让 Runner 自动推进后续节点。调用方不能跳过 `resume` 直接伪造 `Done`，也不能把一个节点的数据提交给另一个节点。
 
+调用方只提交 `Event::Input`。`Event::Pass` 和 `Event::Fail` 是 Runner 返回给 Pipeline 的内部结果，不能用来手工把密码、TOTP、Passkey 或其他校验节点标记为通过。需要输入的 `Verify` 节点也使用 `Event::Input` 提交原始数据，提交后再调用 `run` 由 Runner 完成检查。
+
+签发节点返回的临时材料会放在当前节点的 `run.context.data` 中。例如 Passkey 的 `options` 和 `state`、验证码的 `challenge` 都要先交给浏览器或用户，再提交后续输入。它们仍属于短期认证材料，Run 在材料未被消费前不能序列化保存；调用方应在自己的短期存储中设置 TTL。
+
 只有 Pipeline 返回 `Done`，调用方才应该认为认证流程完成。`Retry`、`Deny` 和 `Need` 都不能签发最终登录结果。
 
 ### 第七步：保存和恢复 Run
@@ -397,6 +403,8 @@ let progress = pipeline.run(&mut run, &runner).await?;
 恢复时使用发布 Run 时的同一份 Pipeline；如果配置版本或 hash 不一致，bridge 会拒绝继续，避免新配置误接管旧认证流程。
 
 Run 会拒绝持久化密码、验证码、Token、state、nonce 等敏感字段。调用方仍应在存储层设置认证流程 TTL，并在登录结束、失败或取消时删除 Run。
+
+如果流程需要跨请求暂停，调用方先把当前节点展示给用户所需的 `challenge`、Passkey `options` 或 `state` 保存到自己的短期存储，然后调用 `run.clear()` 清理 Run 中的临时材料，再保存 Run。下一次提交输入时，把短期存储中的 `state` 或验证码材料放回 `Event::Input`，bridge 不替调用方保存这些内容。
 
 ## 5. 常见流程示例
 
@@ -878,13 +886,19 @@ Node::effect("audit", "audit")
 
 `once(true)` 让同一个 Run 不重复执行该副作用，`idempotency` 则提供跨进程幂等 Key。审计、短信发送、邮件发送等有外部影响的节点应考虑这两个字段。
 
-跨进程运行时，实现 `Effects`，并让 `begin` 在自己的存储中原子占用 Key。Pipeline 不绑定 Redis、数据库或具体 async runtime。节点的 `timeout` 只是策略值，真正的任务中断由调用方 runtime 执行。
+跨进程运行时，实现 `Effects`，并让 `begin` 在自己的存储中原子占用 Key。返回 `New` 表示当前进程拿到执行租约，返回 `Busy` 表示其他进程仍在执行，返回 `Done` 表示已经有完成结果。执行租约必须带过期时间，进程崩溃后才能重新接管；`complete` 和 `cancel` 只能由存储实现确认当前租约。Pipeline 不绑定 Redis、数据库或具体 async runtime。
+
+节点的 `timeout` 会在 Runner 返回后检查已用时间。要中断一个一直不返回的异步任务，调用方仍需在自己的 runtime 中包裹 Runner；bridge 不持有 runtime，也不会替调用方取消任务。`retries` 只对 Runner 返回的可重试存储、网络和通知错误计数，超过次数后流程进入 `Deny`。
 
 ## 9. Device 和 Passkey
 
 Device 提供 RSA-SHA256 nonce 证明、启停、时间窗口和单次 nonce 消费。调用方保存设备公钥和状态，并在 Store 中实现 `save`、`find`、`update` 和 `revoke`。
 
 Passkey 提供 WebAuthn 注册、认证、计数器条件更新和凭证状态更新。认证 state 的单次保存和消费由调用方通过 `Secrets` 完成。
+
+SAML 响应必须使用 `SamlAuth::check` 或 `SamlAuth::check_state`，并传入调用方实现的原子重放缓存。没有重放缓存的校验入口不提供，避免同一断言被重复接受。需要身份时使用 `identity`，它同样要求重放缓存。
+
+Token 撤销记录只使用 Token 的摘要作为存储键，不把完整 Token 写入 `Secrets` 的键名。调用方仍负责给撤销记录设置与 Token 剩余有效期一致的 TTL。
 
 LDAP 配置支持 `timeout`，单位为秒，默认 8 秒，用于限制连接和 LDAP 操作等待时间。
 

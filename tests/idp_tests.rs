@@ -95,13 +95,13 @@ fn test_saml_fixture_and_replay_cache() {
     let now = std::time::SystemTime::now();
     let cache = InMemoryReplayCache::new(16);
 
-    let assertion = saml.check_with(response, now, &cache).unwrap();
+    let assertion = saml.check(response, now, &cache).unwrap();
     assert_eq!(assertion.name_id, "alice@example.com");
     assert_eq!(assertion.email.as_deref(), Some("alice@example.com"));
     assert_eq!(assertion.display_name.as_deref(), Some("Alice Example"));
     assert!(assertion.assertion_id.is_some());
 
-    assert!(saml.check_with(response, now, &cache).is_err());
+    assert!(saml.check(response, now, &cache).is_err());
     assert!(saml.check_state(response, now, &tracker, &cache).is_err());
 }
 
@@ -252,9 +252,14 @@ async fn test_social_and_enterprise_providers() {
         sp_acs_url: "https://app.example.com/saml/acs".into(),
     })
     .unwrap();
+    let cache = saml::InMemoryReplayCache::new(16);
     assert!(
-        saml.check(b"<invalid-saml-response />", std::time::SystemTime::now())
-            .is_err()
+        saml.check(
+            b"<invalid-saml-response />",
+            std::time::SystemTime::now(),
+            &cache
+        )
+        .is_err()
     );
 }
 
@@ -409,6 +414,13 @@ fn test_captcha_units() {
     assert!(!VerifyClick::verify(&targets, &wrong_clicks));
 }
 
+#[test]
+fn code_storage_key_does_not_expose_target() {
+    let key = halo::validator::issuer::Code::key("login_sms", "+8613800138000");
+    assert!(!key.contains("13800138000"));
+    assert!(key.starts_with("code:login_sms:"));
+}
+
 // 内存模拟 Secrets
 struct MemSecrets {
     data: Mutex<HashMap<String, String>>,
@@ -554,6 +566,17 @@ impl Secrets for MemSecrets {
     async fn del(&self, key: &str) -> halo::Result<()> {
         self.data.lock().unwrap().remove(key);
         Ok(())
+    }
+
+    async fn incr(&self, key: &str, _ttl: u64) -> halo::Result<u32> {
+        let mut data = self.data.lock().unwrap();
+        let next = data
+            .get(key)
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap_or(0)
+            .saturating_add(1);
+        data.insert(key.to_string(), next.to_string());
+        Ok(next)
     }
 }
 
@@ -895,6 +918,8 @@ async fn test_oidc_refresh_rotates_and_revokes_old_token() {
             .unwrap();
     assert_ne!(refresh, next_refresh);
     assert!(oidc::Flow::is_token_revoked(&kv, &refresh).await.unwrap());
+    let keys = kv.data.lock().unwrap().keys().cloned().collect::<Vec<_>>();
+    assert!(keys.iter().all(|key| !key.contains(&refresh)));
     assert!(
         oidc::Flow::exchange_refresh_token(&clients, &users, &service, &kv, &request)
             .await
@@ -1003,14 +1028,11 @@ fn test_totp_and_recovery_codes() {
         .collect();
 
     // 正确消费一个恢复码
-    let consumed_hash =
-        halo::pkg::recovery::RecoveryCode::verify_and_consume(&batch[0], &hashes).unwrap();
+    let consumed_hash = halo::pkg::recovery::RecoveryCode::verify(&batch[0], &hashes).unwrap();
     assert_eq!(consumed_hash, hashes[0]);
 
     // 错误恢复码拦截
-    assert!(
-        halo::pkg::recovery::RecoveryCode::verify_and_consume("INVALID-CODE", &hashes).is_err()
-    );
+    assert!(halo::pkg::recovery::RecoveryCode::verify("INVALID-CODE", &hashes).is_err());
 
     // 4. 用户专属 Salt 强绑定派生测试
     let user_id = 3000000000000001;

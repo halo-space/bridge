@@ -27,6 +27,9 @@ impl Captcha {
         self
     }
 
+    /// 校验挑战并记录失败次数。
+    ///
+    /// `Secrets::incr` 必须由调用方以原子方式实现，bridge 不使用非原子的读写回退。
     pub async fn verify<K: Secrets>(&self, kv: &K, req: &CaptchaVerifyReq) -> Result<()> {
         let key = format!("cap:{}", req.id);
         let attempts_key = format!("cap:attempts:{}", req.id);
@@ -40,26 +43,10 @@ impl Captcha {
         if stored_type != req.captcha_type {
             return Err(Error::CaptchaFailed("Captcha type mismatch".into()));
         }
-        let attempts = match kv.incr(&attempts_key, 120).await {
-            Ok(attempts) => {
-                if attempts > self.max_attempts {
-                    return Err(Error::CaptchaFailed("Too many attempts".into()));
-                }
-                Some(attempts)
-            }
-            Err(Error::Unsupported(_)) => {
-                let attempts = kv
-                    .get(&attempts_key)
-                    .await?
-                    .and_then(|v| v.parse::<u32>().ok())
-                    .unwrap_or(0);
-                if attempts >= self.max_attempts {
-                    return Err(Error::CaptchaFailed("Too many attempts".into()));
-                }
-                None
-            }
-            Err(error) => return Err(error),
-        };
+        let attempts = kv.incr(&attempts_key, 120).await?;
+        if attempts > self.max_attempts {
+            return Err(Error::CaptchaFailed("Too many attempts".into()));
+        }
 
         let passed = match req.captcha_type {
             CaptchaType::Image => Image::verify(&answer, req.text.as_deref().unwrap_or("")),
@@ -83,18 +70,8 @@ impl Captcha {
         };
 
         if !passed {
-            if let Some(attempts) = attempts {
-                if attempts >= self.max_attempts {
-                    return Err(Error::CaptchaFailed("Too many attempts".into()));
-                }
-            } else {
-                let current = kv
-                    .get(&attempts_key)
-                    .await?
-                    .and_then(|v| v.parse::<u32>().ok())
-                    .unwrap_or(0);
-                kv.set(&attempts_key, &(current + 1).to_string(), 120)
-                    .await?;
+            if attempts >= self.max_attempts {
+                return Err(Error::CaptchaFailed("Too many attempts".into()));
             }
             return Err(Error::CaptchaFailed("Verification failed".into()));
         }

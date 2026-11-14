@@ -1,4 +1,5 @@
 use rand_core::{OsRng, RngCore};
+use sha2::{Digest, Sha256};
 
 use crate::error::Result;
 use crate::store::{Limits, Secrets};
@@ -31,7 +32,7 @@ pub struct Code;
 
 impl Code {
     pub fn key(scene: &str, target: &str) -> String {
-        format!("code:{scene}:{target}")
+        format!("code:{scene}:{}", Self::target(target))
     }
 
     pub fn scene_key(scene: Scene, target: &str) -> String {
@@ -83,7 +84,12 @@ impl Code {
         window_secs: u64,
     ) -> Result<String> {
         let key = Self::scene_key(scene, target);
-        let rate_key = format!("{}:{target}", scene.name());
+        let rate_key = format!("{}:{}", scene.name(), Self::target(target));
         Self::issue_with_rate(kv, rate, &key, &rate_key, ttl, digits, limit, window_secs).await
+    }
+
+    fn target(target: &str) -> String {
+        let digest = Sha256::digest(target.as_bytes());
+        digest.iter().map(|byte| format!("{byte:02x}")).collect()
     }
 }
