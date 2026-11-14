@@ -1,6 +1,7 @@
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use halo::factor::basic::magic::MagicLinkConfig;
+use halo::factor::enterprise::Dispatch;
 use halo::factor::oidc;
 use halo::factor::passkey::Passkey;
 use halo::pkg::password::{Algorithm, Password};
@@ -107,20 +108,23 @@ fn test_saml_fixture_and_replay_cache() {
     })
     .unwrap();
     let (dispatch, tracker) = saml.start(Some("bridge-state")).unwrap();
-    assert!(matches!(dispatch, saml::binding::Dispatch::Post(_)));
+    assert!(matches!(dispatch, Dispatch::Post { .. }));
     assert!(!tracker.request_id().is_empty());
     let response = include_bytes!("fixtures/saml_response.xml");
     let now = std::time::SystemTime::now();
-    let cache = InMemoryReplayCache::new(16);
+    let mut cache = InMemoryReplayCache::new();
 
-    let assertion = saml.check(response, now, &cache).unwrap();
+    let assertion = saml.check(response, now, &mut cache).unwrap();
     assert_eq!(assertion.name_id, "alice@example.com");
     assert_eq!(assertion.email.as_deref(), Some("alice@example.com"));
     assert_eq!(assertion.display_name.as_deref(), Some("Alice Example"));
     assert!(assertion.assertion_id.is_some());
 
-    assert!(saml.check(response, now, &cache).is_err());
-    assert!(saml.check_state(response, now, &tracker, &cache).is_err());
+    assert!(saml.check(response, now, &mut cache).is_err());
+    assert!(
+        saml.check_state(response, now, &tracker, &mut cache)
+            .is_err()
+    );
 }
 
 #[test]
@@ -270,12 +274,12 @@ async fn test_social_and_enterprise_providers() {
         sp_acs_url: "https://app.example.com/saml/acs".into(),
     })
     .unwrap();
-    let cache = saml::InMemoryReplayCache::new(16);
+    let mut cache = saml::InMemoryReplayCache::new();
     assert!(
         saml.check(
             b"<invalid-saml-response />",
             std::time::SystemTime::now(),
-            &cache
+            &mut cache
         )
         .is_err()
     );
@@ -328,15 +332,14 @@ fn test_token_issue_and_verify() {
 
 #[test]
 fn test_token_issue_and_verify_rs256_and_jwks() {
-    use rsa::pkcs8::{EncodePrivateKey, LineEnding};
+    use sad_rsa::pkcs8::{EncodePrivateKey, EncodePublicKey, LineEnding};
 
     // 1. 生成 RSA 秘钥
-    let mut rng = rand_core::OsRng;
-    let priv_key = rsa::RsaPrivateKey::new(&mut rng, 2048).unwrap();
+    let mut rng = rand::rng();
+    let priv_key = sad_rsa::RsaPrivateKey::new(&mut rng, 2048).unwrap();
     let priv_pem_str = priv_key.to_pkcs8_pem(LineEnding::LF).unwrap().to_string();
-    let pub_key = rsa::RsaPublicKey::from(&priv_key);
-    let pub_pem_str =
-        rsa::pkcs8::EncodePublicKey::to_public_key_pem(&pub_key, LineEnding::LF).unwrap();
+    let pub_key = sad_rsa::RsaPublicKey::from(&priv_key);
+    let pub_pem_str = pub_key.to_public_key_pem(LineEnding::LF).unwrap();
 
     let service = token::Token::with_rsa_pem(
         "https://aiwiki.vip",
@@ -441,7 +444,7 @@ fn code_storage_key_does_not_expose_target() {
 
 #[test]
 fn external_oidc_authorize_and_id_token_validation() {
-    use rsa::pkcs8::{EncodePrivateKey, LineEnding};
+    use sad_rsa::pkcs8::{EncodePrivateKey, EncodePublicKey, LineEnding};
 
     let issuer = "https://login.example";
     let provider = oidc::Provider::new(oidc::Config {
@@ -468,12 +471,11 @@ fn external_oidc_authorize_and_id_token_validation() {
     assert!(url.contains("state=state-1"));
     assert!(url.contains("nonce=nonce-1"));
 
-    let mut rng = rand_core::OsRng;
-    let private = rsa::RsaPrivateKey::new(&mut rng, 2048).unwrap();
+    let mut rng = rand::rng();
+    let private = sad_rsa::RsaPrivateKey::new(&mut rng, 2048).unwrap();
     let private_pem = private.to_pkcs8_pem(LineEnding::LF).unwrap();
-    let public = rsa::RsaPublicKey::from(&private);
-    let public_pem =
-        rsa::pkcs8::EncodePublicKey::to_public_key_pem(&public, LineEnding::LF).unwrap();
+    let public = sad_rsa::RsaPublicKey::from(&private);
+    let public_pem = public.to_public_key_pem(LineEnding::LF).unwrap();
     let jwks = token::JwksResponse::from_rsa_pem(&public_pem, "key-1").unwrap();
     let discovery = oidc::Discovery {
         issuer: issuer.into(),

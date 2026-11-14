@@ -3,5 +3,5 @@ mod auth;
 mod config;
 
 pub use assertion::SamlAssertion;
-pub use auth::SamlAuth;
+pub use auth::{Dispatch, SamlAuth, Tracker};
 pub use config::SamlConfig;

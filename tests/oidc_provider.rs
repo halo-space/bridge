@@ -1,18 +1,17 @@
 use halo::factor::oidc::{Config, Provider};
 use halo::token::JwksResponse;
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
-use rsa::pkcs8::{EncodePrivateKey, LineEnding};
+use sad_rsa::pkcs8::{EncodePrivateKey, EncodePublicKey, LineEnding};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 #[tokio::test]
 async fn exchange_code_reads_discovery_and_validates_id_token() {
-    let mut rng = rand_core::OsRng;
-    let private = rsa::RsaPrivateKey::new(&mut rng, 2048).unwrap();
+    let mut rng = rand::rng();
+    let private = sad_rsa::RsaPrivateKey::new(&mut rng, 2048).unwrap();
     let private_pem = private.to_pkcs8_pem(LineEnding::LF).unwrap();
-    let public = rsa::RsaPublicKey::from(&private);
-    let public_pem =
-        rsa::pkcs8::EncodePublicKey::to_public_key_pem(&public, LineEnding::LF).unwrap();
+    let public = sad_rsa::RsaPublicKey::from(&private);
+    let public_pem = public.to_public_key_pem(LineEnding::LF).unwrap();
     let jwks = JwksResponse::from_rsa_pem(&public_pem, "key-1").unwrap();
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

@@ -44,8 +44,8 @@ sad-rsa = { version = "0.10.3", features = ["sha2", "getrandom"] }
 lettre = { version = "0.11.23", optional = true, default-features = false, features = ["tokio1-rustls-tls", "smtp-transport", "builder"] }
 reqwest = { version = "0.13.5", optional = true, default-features = false, features = ["json", "form", "rustls"] }
 ldap3 = { version = "0.12.1", optional = true, default-features = false, features = ["tls-rustls-ring"] }
-saml = { version = "0.1.0-alpha.1", optional = true, default-features = false, features = ["rsa-sha", "ecdsa-sha"] }
-webauthn-rs = { version = "0.6.2", optional = true, features = ["danger-allow-state-serialisation"] }
+saml = { package = "saml-rs", version = "0.8", optional = true, default-features = false, features = ["crypto-aws-lc"] }
+webauthn-rs = { version = "0.6.2", optional = true, default-features = false, features = ["danger-allow-state-serialisation"] }
 bcrypt = "0.17"
 pbkdf2 = { version = "0.12", features = ["simple"] }
 sm3 = "0.4"
@@ -54,7 +54,6 @@ digest = "0.10"
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
 proptest = "1"
-rsa = { version = "0.9", features = ["sha2", "pem"] }
 
 [[bench]]
 name = "pipeline"

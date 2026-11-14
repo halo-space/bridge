@@ -130,7 +130,8 @@ bridge 不新增 RBAC、业务用户中心、Session 管理和租户字段。
 - [x] 增加真实协议样例和可控 Mock 服务测试。
 - [x] 增加密码、TOTP、Token、Pipeline、Provider 和 Sender 的 benchmark。
 - [x] 增加 CI、MSRV、clippy、rustdoc、依赖安全检查和 feature 矩阵。
-- [ ] 替换当前 SAML、Passkey 和 RSA 依赖链中的安全公告；MSRV 已提升到 1.91，SAML 优先迁移到 `saml-rs`/`risaml` 的 AWS-LC 后端，Passkey 继续评估成熟第三方实现，不能通过忽略公告掩盖。
+- [x] SAML 已迁移到 `saml-rs` 0.8 的 AWS-LC 后端；bridge 自有 RSA 已迁移到 `sad-rsa`，测试不再直接依赖旧 RSA 包。
+- [ ] Passkey 继续跟踪 `webauthn-rs` 的上游 RSA 公告；当前公告来自其 FIDO 证书链依赖，bridge 不直接调用该 RSA 实现，待上游提供修复或成熟替代实现后再迁移，不能通过忽略公告掩盖。
 
 ## 每项完成时的验收
 

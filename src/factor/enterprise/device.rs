@@ -58,9 +58,9 @@ mod tests {
     use crate::store::Secrets;
     use base64::Engine;
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-    use rand_core::OsRng;
-    use rsa::{RsaPrivateKey, RsaPublicKey, pkcs1v15::Pkcs1v15Sign, pkcs8::EncodePublicKey};
-    use sha2::{Digest, Sha256};
+    use sad_rsa::pkcs8::EncodePublicKey;
+    use sad_rsa::sha2::{Digest, Sha256};
+    use sad_rsa::{Pkcs1v15Sign, RsaPrivateKey, RsaPublicKey};
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
 
@@ -94,9 +94,9 @@ mod tests {
 
     #[test]
     fn verifies_and_rejects_device_proof() {
-        let private = RsaPrivateKey::new(&mut OsRng, 2048).unwrap();
+        let private = RsaPrivateKey::new(&mut rand::rng(), 2048).unwrap();
         let public = RsaPublicKey::from(&private)
-            .to_public_key_pem(rsa::pkcs8::LineEnding::LF)
+            .to_public_key_pem(sad_rsa::pkcs8::LineEnding::LF)
             .unwrap();
         let device = Device::new("d1", "u1", "laptop", public, 100);
         let message = "d1:nonce:100";

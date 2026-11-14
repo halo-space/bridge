@@ -991,7 +991,44 @@ Device 提供 RSA-SHA256 nonce 证明、启停、时间窗口和单次 nonce 消
 
 Passkey 提供 WebAuthn 注册、认证、计数器条件更新和凭证状态更新。认证 state 的单次保存和消费由调用方通过 `Secrets` 完成。
 
-SAML 响应必须使用 `SamlAuth::check` 或 `SamlAuth::check_state`，并传入调用方实现的原子重放缓存。没有重放缓存的校验入口不提供，避免同一断言被重复接受。需要身份时使用 `identity`，它同样要求重放缓存。
+SAML 使用 `saml-rs` 提供协议解析和签名校验。`SamlAuth::new` 只接受配置和 IdP 元数据，不维护用户或会话。`start` 返回浏览器要提交的 `SamlDispatch` 和可序列化的 `SamlTracker`；调用方把 tracker 存在自己的短期认证状态中，回调时传给 `check_state`。IdP 主动登录使用 `check`。两个校验入口都必须传入调用方实现的原子重放缓存，没有缓存就不会接受响应，避免同一断言被重复使用。
+
+```rust
+use halo::factor::enterprise::{Dispatch, SamlAuth, SamlConfig};
+use saml::InMemoryReplayCache;
+use std::time::SystemTime;
+
+let saml = SamlAuth::new(&SamlConfig {
+    idp_entity_id: "https://idp.example.com/metadata".into(),
+    idp_sso_url: "https://idp.example.com/sso".into(),
+    metadata: idp_metadata.into(),
+    sp_entity_id: "https://app.example.com/metadata".into(),
+    sp_acs_url: "https://app.example.com/saml/acs".into(),
+})?;
+let (dispatch, tracker) = saml.start(Some("login-transaction"))?;
+match dispatch {
+    Dispatch::Post { action, fields } => {
+        // 调用方把 action 和 fields 渲染为自动提交表单。
+        save_tracker(tracker)?;
+        submit_post(action, fields)?;
+    }
+    Dispatch::Redirect(url) => redirect(url),
+}
+
+let tracker = load_tracker()?;
+let mut replay = InMemoryReplayCache::new();
+let assertion = saml.check_state(
+    saml_response_xml.as_bytes(),
+    SystemTime::now(),
+    &tracker,
+    &mut replay,
+)?;
+let identity = assertion.identity();
+// identity 交给调用方决定如何绑定、授权或签发 Token。
+let _ = identity;
+```
+
+示例中的 `MetadataTrustPolicy::UnsignedForCompatibility` 只用于当前 `SamlAuth` 的兼容元数据入口；生产环境应在应用接入层先校验并固定 IdP 元数据来源和签名证书，再把受信元数据交给 bridge。bridge 不保存 IdP 元数据，也不替调用方维护用户绑定。
 
 Token 撤销记录只使用 Token 的摘要作为存储键，不把完整 Token 写入 `Secrets` 的键名。调用方仍负责给撤销记录设置与 Token 剩余有效期一致的 TTL。
 
