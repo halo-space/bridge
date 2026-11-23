@@ -27,6 +27,8 @@ pub enum Dispatch {
 pub struct Tracker {
     request_id: String,
     relay_state: Option<String>,
+    issued_at: i64,
+    expires_at: i64,
 }
 
 impl Tracker {
@@ -34,7 +36,19 @@ impl Tracker {
     pub fn request_id(&self) -> &str {
         &self.request_id
     }
+
+    /// 发起时间。
+    pub fn issued_at(&self) -> i64 {
+        self.issued_at
+    }
+
+    /// 过期时间。
+    pub fn expires_at(&self) -> i64 {
+        self.expires_at
+    }
 }
+
+const TRACKER_TTL: i64 = 300;
 
 /// SAML service provider adapter backed by `saml-rs`.
 pub struct SamlAuth {
@@ -113,9 +127,12 @@ impl SamlAuth {
             .sp
             .start_sso(&self.idp, StartSso::post().relay_state(relay))
             .map_err(|e| Error::OAuthError(format!("SAML login start rejected: {e}")))?;
+        let issued_at = crate::pkg::time::now();
         let tracker = Tracker {
             request_id: started.pending.request_id().as_str().to_string(),
             relay_state: started.pending.relay_state().as_deref().map(str::to_string),
+            issued_at,
+            expires_at: issued_at.saturating_add(TRACKER_TTL),
         };
         let form = started
             .outbound
@@ -143,6 +160,13 @@ impl SamlAuth {
         tracker: &Tracker,
         replay: &mut dyn ReplayCache,
     ) -> Result<SamlAssertion> {
+        let now_timestamp = now
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_err(|_| Error::OAuthError("Invalid SAML validation time".into()))?
+            .as_secs() as i64;
+        if tracker.issued_at > now_timestamp || tracker.expires_at <= now_timestamp {
+            return Err(Error::OAuthError("SAML tracker expired".into()));
+        }
         self.finish(
             BrowserInput::<SsoResponse>::post(vec![FormField::new(
                 "SAMLResponse",

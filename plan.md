@@ -134,7 +134,7 @@ bridge 不新增 RBAC、业务用户中心、Session 管理和租户字段。
 - [x] 已升级 `sad-rsa`、`lettre` 和 `url` 到修复公告的版本；当前审计只剩 Passkey 上游 `webauthn-rs` 带入的 RSA 预发布依赖。
 - [ ] Passkey 继续跟踪 `webauthn-rs` 的上游 RSA 公告；当前公告来自其 FIDO 证书链依赖，bridge 不直接调用该 RSA 实现，待上游提供修复或成熟替代实现后再迁移，不能通过忽略公告掩盖。
 - [ ] SAML 元数据的信任策略改为调用方显式选择；生产入口默认要求固定证书签名，`UnsignedForCompatibility` 只能作为明确的兼容选项。
-- [ ] SAML `Tracker` 增加发起时间和过期边界，恢复时由 bridge 校验有效期，不能只依赖调用方存储 TTL。
+- [x] SAML `Tracker` 增加发起时间和过期边界，恢复时由 bridge 校验有效期；调用方 TTL 仍用于清理存储。
 - [x] bridge 自有时间逻辑已迁移到 `jiff`；`chrono` 仅由 `saml-rs` 的间接依赖 `tsp-ltv` 引入，继续跟踪上游替换。
 
 ## 每项完成时的验收

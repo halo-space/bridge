@@ -43,3 +43,22 @@ fn invalid_response_is_rejected() {
             .is_err()
     );
 }
+
+#[test]
+fn expired_tracker_is_rejected_before_response_parsing() {
+    let saml = auth();
+    let (_, tracker) = saml.start(Some("bridge-state")).unwrap();
+    let mut value = serde_json::to_value(&tracker).unwrap();
+    value["expires_at"] = serde_json::json!(0);
+    let tracker = serde_json::from_value(value).unwrap();
+    let mut cache = InMemoryReplayCache::new();
+    let error = saml
+        .check_state(
+            b"<invalid-saml-response />",
+            SystemTime::now(),
+            &tracker,
+            &mut cache,
+        )
+        .unwrap_err();
+    assert!(error.to_string().contains("tracker expired"));
+}
