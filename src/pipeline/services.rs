@@ -363,7 +363,7 @@ fn pass(data: Value) -> Output {
         routes: Vec::new(),
         data,
         identity: None,
-        at: chrono::Utc::now().timestamp(),
+        at: crate::pkg::time::now(),
     }
 }
 
@@ -372,7 +372,7 @@ fn identity_pass(user: User) -> Output {
         routes: Vec::new(),
         data: json!({ "authenticated": true, "subject": user.id.to_string() }),
         identity: Some(user.identity()),
-        at: chrono::Utc::now().timestamp(),
+        at: crate::pkg::time::now(),
     }
 }
 

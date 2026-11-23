@@ -94,7 +94,7 @@ impl AuditEvent {
             outcome,
             reason: None,
             metadata: serde_json::Value::Null,
-            timestamp: chrono::Utc::now().timestamp(),
+            timestamp: crate::pkg::time::now(),
         }
     }
 

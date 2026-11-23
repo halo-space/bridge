@@ -35,7 +35,7 @@ impl Default for Policy {
 impl Policy {
     /// 根据当前连续失败记录与锁定截止时间评估登录状态
     pub fn evaluate(&self, failed_attempts: u32, locked_until_timestamp: Option<i64>) -> Decision {
-        let now = chrono::Utc::now().timestamp();
+        let now = crate::pkg::time::now();
 
         // 1. 检查是否在锁定窗口期内
         if let Some(locked_until) = locked_until_timestamp

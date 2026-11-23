@@ -54,11 +54,9 @@ impl Tencent {
             ));
         }
         let (endpoint, host) = self.endpoint()?;
-        let timestamp = chrono::Utc::now().timestamp();
-        let date = chrono::DateTime::from_timestamp(timestamp, 0)
-            .ok_or_else(|| Error::SmsFailed("Invalid timestamp".into()))?
-            .format("%Y-%m-%d")
-            .to_string();
+        let timestamp = crate::pkg::time::now();
+        let date = crate::pkg::time::date(timestamp)
+            .ok_or_else(|| Error::SmsFailed("Invalid timestamp".into()))?;
         let body = serde_json::to_string(&serde_json::json!({
             "PhoneNumberSet": [normalize_phone(phone)],
             "SmsSdkAppid": self.config.sdk_app_id.trim(),

@@ -237,8 +237,7 @@ fn assertion(session: &saml::SsoSession) -> SamlAssertion {
     }
     let expires_at = session
         .not_on_or_after()
-        .and_then(|instant| chrono::DateTime::parse_from_rfc3339(instant.as_str()).ok())
-        .map(|instant| instant.timestamp());
+        .and_then(|instant| crate::pkg::time::parse(instant.as_str()));
     SamlAssertion {
         name_id: session.name_id().value().to_string(),
         session_index: session

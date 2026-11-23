@@ -2,7 +2,6 @@ use super::claims::Claims;
 use crate::error::{Error, Result};
 use crate::store::Secrets;
 use crate::types::{Identity, User};
-use chrono::Utc;
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
 
 pub struct Token {
@@ -132,7 +131,7 @@ impl Token {
             return Err(Error::TokenError("Token subject cannot be empty".into()));
         }
         let custom_claims = validate_custom(custom_claims)?;
-        let now = Utc::now().timestamp();
+        let now = crate::pkg::time::now();
         let username = username.unwrap_or(subject).to_string();
 
         // 1. Access Token（携带身份载荷和自定义扩展字段）
@@ -245,7 +244,7 @@ impl Token {
         if subject.trim().is_empty() {
             return Err(Error::TokenError("Token subject cannot be empty".into()));
         }
-        let now = Utc::now().timestamp();
+        let now = crate::pkg::time::now();
         let mut custom = serde_json::Map::new();
         if let Some(nonce) = nonce {
             custom.insert("nonce".into(), serde_json::Value::String(nonce));

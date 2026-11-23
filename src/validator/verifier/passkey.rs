@@ -2,7 +2,6 @@ use crate::error::Result;
 use crate::factor::passkey::Passkey as StoredPasskey;
 use crate::store::Secrets;
 use base64::Engine;
-use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use url::Url;
 use webauthn_rs::prelude::{
@@ -60,7 +59,7 @@ impl Passkey {
             aaguid: None,
             user_handle: Some(user_handle),
             display_name: Some(display_name),
-            created_at: Utc::now().timestamp(),
+            created_at: crate::pkg::time::now(),
             last_used_at: None,
             passwordless: false,
             user_verified: info.cred.user_verified,
@@ -121,7 +120,7 @@ impl Passkey {
             credential_id: base64::engine::general_purpose::URL_SAFE_NO_PAD
                 .encode(result.cred_id()),
             counter: result.counter(),
-            at: Utc::now().timestamp(),
+            at: crate::pkg::time::now(),
             user_verified: result.user_verified(),
             backup_eligible: result.backup_eligible(),
             backup_state: result.backup_state(),

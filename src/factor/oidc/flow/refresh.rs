@@ -52,7 +52,7 @@ impl Flow {
             return Err(Error::TokenError("Refresh token revoked".into()));
         }
 
-        let remaining = (claims.exp - chrono::Utc::now().timestamp()).max(1) as u64;
+        let remaining = (claims.exp - crate::pkg::time::now()).max(1) as u64;
         let key = crate::token::refresh_key(refresh_token);
         if !kv
             .claim(&key, &Uuid::new_v4().to_string(), remaining)

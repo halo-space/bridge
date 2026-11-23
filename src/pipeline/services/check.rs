@@ -31,7 +31,7 @@ where
                 data: serde_json::to_value(assessment)
                     .map_err(|error| Error::Internal(error.to_string()))?,
                 identity: context.identity.clone(),
-                at: chrono::Utc::now().timestamp(),
+                at: crate::pkg::time::now(),
             });
         }
         if kind == "identity" && context.identity.is_some() {

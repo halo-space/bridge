@@ -70,7 +70,7 @@ where
             "user_verified": auth.user_verified,
             }),
             identity,
-            at: chrono::Utc::now().timestamp(),
+            at: crate::pkg::time::now(),
         })
     }
 }

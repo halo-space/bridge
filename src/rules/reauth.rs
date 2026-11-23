@@ -1,5 +1,3 @@
-use chrono::Utc;
-
 /// 重新认证有效期规则。
 pub struct Reauth;
 
@@ -8,6 +6,6 @@ impl Reauth {
         if at <= 0 || ttl <= 0 {
             return false;
         }
-        Utc::now().timestamp().saturating_sub(at) <= ttl
+        crate::pkg::time::now().saturating_sub(at) <= ttl
     }
 }

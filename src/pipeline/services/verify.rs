@@ -80,7 +80,7 @@ where
             let timestamp = data
                 .get("timestamp")
                 .and_then(Value::as_u64)
-                .unwrap_or_else(|| chrono::Utc::now().timestamp() as u64);
+                .unwrap_or_else(|| crate::pkg::time::now() as u64);
             return self
                 .finish(guard, async {
                     let user = TotpCode::authenticate(

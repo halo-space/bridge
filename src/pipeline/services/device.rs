@@ -24,7 +24,7 @@ where
         let now = data
             .get("now")
             .and_then(Value::as_i64)
-            .unwrap_or_else(|| chrono::Utc::now().timestamp());
+            .unwrap_or_else(crate::pkg::time::now);
         let window = data.get("window").and_then(Value::as_i64).unwrap_or(120);
         let device = self
             .devices
@@ -61,7 +61,7 @@ where
             routes: Vec::new(),
             data: json!({ "verified": true, "device_id": device_id }),
             identity,
-            at: chrono::Utc::now().timestamp(),
+            at: crate::pkg::time::now(),
         })
     }
 }

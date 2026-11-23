@@ -41,10 +41,7 @@ impl Sender for Aliyun {
                 serde_json::json!({"code": code}).to_string(),
             );
             params.insert("AccessKeyId", self.config.access_key_id.trim().to_string());
-            params.insert(
-                "Timestamp",
-                chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
-            );
+            params.insert("Timestamp", crate::pkg::time::text());
             params.insert("SignatureMethod", "HMAC-SHA1".to_string());
             params.insert("SignatureVersion", "1.0".to_string());
             params.insert("SignatureNonce", uuid::Uuid::new_v4().to_string());

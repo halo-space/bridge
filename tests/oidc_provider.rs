@@ -17,7 +17,7 @@ async fn exchange_code_reads_discovery_and_validates_id_token() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
     let issuer = base.as_str();
-    let now = chrono::Utc::now().timestamp();
+    let now = halo::pkg::time::now();
     let claims = serde_json::json!({
         "iss": issuer,
         "sub": "external-7",

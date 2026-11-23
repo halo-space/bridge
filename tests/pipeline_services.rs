@@ -348,7 +348,7 @@ async fn pipeline_runs_totp_and_password_verifiers() {
         },
     };
     let services = services(Mem::default(), user, factors, EventMem::default());
-    let now = chrono::Utc::now().timestamp() as u64;
+    let now = halo::pkg::time::now() as u64;
     let code = Totp::generate_code(&secret, now).unwrap();
     let pipeline = Pipeline::new("totp", vec![Node::verify("totp", "totp")]);
     let (mut run, _) = pipeline

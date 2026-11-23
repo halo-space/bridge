@@ -317,7 +317,7 @@ impl Runner for CompanyRunner {
             routes: Vec::new(),
             data: input,
             identity: Some(Identity::new("company", "employee-42")),
-            at: chrono::Utc::now().timestamp(),
+            at: halo::pkg::time::now(),
         })
     }
 }
@@ -384,7 +384,7 @@ let progress = pipeline.resume(
             "account": "alice",
             "password": "secret"
         }),
-        at: chrono::Utc::now().timestamp(), // 调用方记录输入时间
+        at: halo::pkg::time::now(), // 调用方记录输入时间
     },
 )?;
 
@@ -405,7 +405,7 @@ let progress = pipeline.run(&mut run, &runner).await?;
 如果登录需要跨 HTTP 请求继续，调用方保存序列化后的 Run，并设置自己的短期 TTL：
 
 ```rust
-let run = run.expires_at(chrono::Utc::now().timestamp() + 300);
+let run = run.expires_at(halo::pkg::time::now() + 300);
 let encoded = serde_json::to_vec(&run)?;
 // 写入调用方自己的 Redis 或数据库，并设置短 TTL。
 ```
@@ -416,7 +416,7 @@ let encoded = serde_json::to_vec(&run)?;
 
 ```rust
 // 只从调用方自己的可信短期存储读取，不接受浏览器直接提交的 Run JSON。
-let mut run = pipeline.restore(&encoded, chrono::Utc::now().timestamp())?;
+let mut run = pipeline.restore(&encoded, halo::pkg::time::now())?;
 // 使用发布时的同一份 Pipeline 继续执行。
 let progress = pipeline.run(&mut run, &runner).await?;
 ```
@@ -759,7 +759,7 @@ impl Runner for CompanyPassword {
             routes: Vec::new(), // 不选择命名分支，沿默认边继续
             data: serde_json::json!({"source": "company"}), // 传给下游节点
             identity: Some(Identity::new("company", account)), // 认证成功后的身份
-            at: chrono::Utc::now().timestamp(), // 结果时间
+            at: halo::pkg::time::now(), // 结果时间
         })
     }
 }
@@ -938,7 +938,7 @@ impl Runner for GithubLogin {
             // 只把后续流程需要的资料交给 Pipeline，不把 access_token 放进去。
             data: serde_json::to_value(profile)?,
             identity: Some(identity),
-            at: chrono::Utc::now().timestamp(),
+            at: halo::pkg::time::now(),
         })
     }
 }

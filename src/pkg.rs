@@ -3,4 +3,5 @@ pub mod http;
 pub mod password;
 pub mod recovery;
 pub mod rsa;
+pub mod time;
 pub mod totp;

@@ -32,7 +32,7 @@ impl AuthResult {
             identity,
             method,
             level,
-            at: chrono::Utc::now().timestamp(),
+            at: crate::pkg::time::now(),
         }
     }
 }

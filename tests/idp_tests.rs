@@ -484,7 +484,7 @@ fn external_oidc_authorize_and_id_token_validation() {
         jwks_uri: "https://login.example/oauth2/jwks".into(),
         jwks,
     };
-    let now = chrono::Utc::now().timestamp();
+    let now = halo::pkg::time::now();
     let claims = serde_json::json!({
         "iss": issuer,
         "sub": "external-7",
@@ -630,7 +630,7 @@ impl Passkeys for MemPasskeys {
             return Ok(false);
         }
         *passkey = next;
-        passkey.last_used_at = Some(chrono::Utc::now().timestamp());
+        passkey.last_used_at = Some(halo::pkg::time::now());
         Ok(true)
     }
 }
@@ -1224,7 +1224,7 @@ fn test_totp_and_recovery_codes() {
     assert!(uri.starts_with("otpauth://totp/HaloIAM:user@halo.run"));
 
     // 2. 生成动态口令与核验
-    let now = chrono::Utc::now().timestamp() as u64;
+    let now = halo::pkg::time::now() as u64;
     let code = halo::pkg::totp::Totp::generate_code(&secret, now).unwrap();
     assert_eq!(code.len(), 6);
     assert!(halo::pkg::totp::Totp::verify_code(&secret, &code, now).unwrap());

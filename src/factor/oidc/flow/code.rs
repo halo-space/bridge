@@ -41,7 +41,7 @@ impl Flow {
         ttl: u64,
     ) -> Result<String> {
         let code = format!("code_{}", uuid::Uuid::new_v4().simple());
-        let expires_at = chrono::Utc::now().timestamp() + (ttl as i64);
+        let expires_at = crate::pkg::time::now() + (ttl as i64);
 
         let auth_code = AuthCode {
             code: code.clone(),
@@ -80,7 +80,7 @@ impl Flow {
         let auth_code: AuthCode =
             serde_json::from_str(&val).map_err(|e| Error::Internal(e.to_string()))?;
 
-        if auth_code.expires_at <= chrono::Utc::now().timestamp() {
+        if auth_code.expires_at <= crate::pkg::time::now() {
             return Err(Error::InvalidCode);
         }
 
