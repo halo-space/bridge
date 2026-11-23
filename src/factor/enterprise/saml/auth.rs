@@ -1,12 +1,12 @@
-use super::{SamlAssertion, SamlConfig};
+use super::{SamlAssertion, SamlConfig, Trust};
 use crate::error::{Error, Result};
 use crate::types::Identity;
 use base64::Engine as _;
 use saml::{
-    AcsEndpoint, AssertionSignaturePolicy, BrowserInput, EntityId, FormField, IdpDescriptor,
-    MetadataTrustPolicy, PendingAuthnRequest, PendingSnapshot, RelayStateParam, ReplayCache,
-    ReplayPolicy, Saml, SamlValidationContext, Sp, SpConfig, SpValidationPolicy, SsoResponse,
-    StartSso,
+    AcsEndpoint, AssertionSignaturePolicy, BrowserInput, CertificatePem, EntityId, FormField,
+    IdpDescriptor, MetadataTrustPolicy, PendingAuthnRequest, PendingSnapshot, RelayStateParam,
+    ReplayCache, ReplayPolicy, Saml, SamlValidationContext, Sp, SpConfig, SpValidationPolicy,
+    SsoResponse, StartSso,
 };
 use std::time::SystemTime;
 
@@ -63,11 +63,29 @@ impl SamlAuth {
     pub fn new(config: &SamlConfig) -> Result<Self> {
         let idp_entity = EntityId::try_new(config.idp_entity_id.clone())
             .map_err(|e| Error::OAuthError(format!("Invalid SAML IdP entity: {e}")))?;
-        let idp = IdpDescriptor::from_metadata_xml_for(
-            idp_entity.clone(),
-            &config.metadata,
-            MetadataTrustPolicy::UnsignedForCompatibility,
-        )
+        let idp = match &config.trust {
+            Trust::Unsigned => IdpDescriptor::from_metadata_xml_for(
+                idp_entity.clone(),
+                &config.metadata,
+                MetadataTrustPolicy::UnsignedForCompatibility,
+            ),
+            Trust::Signed { certs } if certs.is_empty() => {
+                return Err(Error::OAuthError(
+                    "SAML signed metadata requires at least one certificate".into(),
+                ));
+            }
+            Trust::Signed { certs } => {
+                let certs: Vec<CertificatePem> =
+                    certs.iter().cloned().map(CertificatePem::new).collect();
+                IdpDescriptor::from_metadata_xml_for(
+                    idp_entity.clone(),
+                    &config.metadata,
+                    MetadataTrustPolicy::RequireSignature {
+                        trusted_certificates: &certs,
+                    },
+                )
+            }
+        }
         .map_err(|e| Error::OAuthError(format!("Invalid SAML metadata: {e}")))?;
         let sso = idp
             .metadata()

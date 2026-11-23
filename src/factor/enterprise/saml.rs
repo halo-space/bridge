@@ -4,4 +4,4 @@ mod config;
 
 pub use assertion::SamlAssertion;
 pub use auth::{Dispatch, SamlAuth, Tracker};
-pub use config::SamlConfig;
+pub use config::{SamlConfig, Trust};

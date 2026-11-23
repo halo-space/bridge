@@ -994,7 +994,7 @@ Passkey 提供 WebAuthn 注册、认证、计数器条件更新和凭证状态�
 SAML 使用 `saml-rs` 提供协议解析和签名校验。`SamlAuth::new` 只接受配置和 IdP 元数据，不维护用户或会话。`start` 返回浏览器要提交的 `SamlDispatch` 和可序列化的 `SamlTracker`；调用方把 tracker 存在自己的短期认证状态中，回调时传给 `check_state`。IdP 主动登录使用 `check`。两个校验入口都必须传入调用方实现的原子重放缓存，没有缓存就不会接受响应，避免同一断言被重复使用。
 
 ```rust
-use halo::factor::enterprise::{Dispatch, SamlAuth, SamlConfig};
+use halo::factor::enterprise::{Dispatch, SamlAuth, SamlConfig, Trust};
 use saml::InMemoryReplayCache;
 use std::time::SystemTime;
 
@@ -1002,6 +1002,7 @@ let saml = SamlAuth::new(&SamlConfig {
     idp_entity_id: "https://idp.example.com/metadata".into(),
     idp_sso_url: "https://idp.example.com/sso".into(),
     metadata: idp_metadata.into(),
+    trust: Trust::Signed { certs: vec![idp_metadata_signing_cert.into()] },
     sp_entity_id: "https://app.example.com/metadata".into(),
     sp_acs_url: "https://app.example.com/saml/acs".into(),
 })?;
@@ -1028,7 +1029,7 @@ let identity = assertion.identity();
 let _ = identity;
 ```
 
-示例中的 `MetadataTrustPolicy::UnsignedForCompatibility` 只用于当前 `SamlAuth` 的兼容元数据入口；生产环境应在应用接入层先校验并固定 IdP 元数据来源和签名证书，再把受信元数据交给 bridge。bridge 不保存 IdP 元数据，也不替调用方维护用户绑定。
+生产环境使用 `Trust::Signed` 并传入调用方固定的 IdP 元数据签名证书。`Trust::Unsigned` 只用于明确的兼容场景。bridge 不保存 IdP 元数据，也不替调用方维护用户绑定。
 
 Token 撤销记录只使用 Token 的摘要作为存储键，不把完整 Token 写入 `Secrets` 的键名。调用方仍负责给撤销记录设置与 Token 剩余有效期一致的 TTL。
 

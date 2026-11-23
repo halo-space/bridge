@@ -1,4 +1,4 @@
-use halo::factor::enterprise::{Dispatch, SamlAuth, SamlConfig};
+use halo::factor::enterprise::{Dispatch, SamlAuth, SamlConfig, Trust};
 use saml::InMemoryReplayCache;
 use std::time::SystemTime;
 
@@ -12,6 +12,7 @@ fn auth() -> SamlAuth {
         idp_entity_id: IDP_ENTITY.into(),
         idp_sso_url: IDP_SSO.into(),
         metadata: include_str!("fixtures/saml_metadata.xml").into(),
+        trust: Trust::Unsigned,
         sp_entity_id: SP_ENTITY.into(),
         sp_acs_url: SP_ACS.into(),
     })
@@ -42,6 +43,21 @@ fn invalid_response_is_rejected() {
         saml.check(b"<invalid-saml-response />", SystemTime::now(), &mut cache)
             .is_err()
     );
+}
+
+#[test]
+fn signed_metadata_requires_a_valid_signature() {
+    let config = SamlConfig {
+        idp_entity_id: IDP_ENTITY.into(),
+        idp_sso_url: IDP_SSO.into(),
+        metadata: include_str!("fixtures/saml_metadata.xml").into(),
+        trust: Trust::Signed {
+            certs: vec!["invalid-certificate".into()],
+        },
+        sp_entity_id: SP_ENTITY.into(),
+        sp_acs_url: SP_ACS.into(),
+    };
+    assert!(SamlAuth::new(&config).is_err());
 }
 
 #[test]

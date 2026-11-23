@@ -103,6 +103,7 @@ fn test_saml_fixture_and_replay_cache() {
         idp_entity_id: "https://idp.example.com/bridge".into(),
         idp_sso_url: "https://idp.example.com/bridge/sso".into(),
         metadata: include_str!("fixtures/saml_metadata.xml").into(),
+        trust: factor::enterprise::Trust::Unsigned,
         sp_entity_id: "https://sp.example.com/bridge".into(),
         sp_acs_url: "https://sp.example.com/bridge/acs".into(),
     })
@@ -270,6 +271,7 @@ async fn test_social_and_enterprise_providers() {
         idp_entity_id: "https://idp.example.com/saml".into(),
         idp_sso_url: "https://idp.example.com/saml/sso".into(),
         metadata: saml_metadata.into(),
+        trust: factor::enterprise::Trust::Unsigned,
         sp_entity_id: "https://app.example.com/saml".into(),
         sp_acs_url: "https://app.example.com/saml/acs".into(),
     })
