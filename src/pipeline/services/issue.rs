@@ -36,7 +36,7 @@ where
                 .await?;
             return Ok(pass(json!({ "challenge": challenge })));
         }
-        if matches!(kind, "passkey" | "webauthn") {
+        if kind == "passkey" {
             return self.issue_passkey(node, context).await;
         }
 

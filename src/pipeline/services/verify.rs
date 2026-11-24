@@ -32,7 +32,7 @@ where
                 })
                 .await;
         }
-        if kind == "sms" || kind == "code.sms" {
+        if kind == "sms" {
             let phone = string(data, "phone")?;
             let code = string(data, "code")?;
             let scene = data
@@ -53,7 +53,7 @@ where
                 })
                 .await;
         }
-        if kind == "email" || kind == "code.email" {
+        if kind == "email" {
             let email = string(data, "email")?;
             let code = string(data, "code")?;
             let scene = data
@@ -117,7 +117,7 @@ where
                 })
                 .await;
         }
-        if kind == "passkey" || kind == "webauthn" {
+        if kind == "passkey" {
             return self.finish(guard, self.verify_passkey(context, data)).await;
         }
         if kind == "device" {

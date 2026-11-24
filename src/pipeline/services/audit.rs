@@ -12,7 +12,7 @@ where
 {
     pub(super) async fn audit(&self, context: &Context, kind: &str) -> Result<Output> {
         let event_type = match kind {
-            "audit" | "auth.success" => AuditEventType::AuthSuccess,
+            "audit" => AuditEventType::AuthSuccess,
             "auth.failed" => AuditEventType::AuthFailed,
             "mfa.challenge" => AuditEventType::MfaChallenged,
             "mfa.passed" => AuditEventType::MfaPassed,

@@ -607,23 +607,23 @@ Passkey 使用两个独立类型：`validator::issuer::Passkey` 负责发起，`
 Passkey 通常分成签发注册/认证选项和校验浏览器返回值：
 
 ```text
-1. 已有身份进入 Passkey：`issue(webauthn)`
+1. 已有身份进入 Passkey：`issue(passkey)`
 2. 把浏览器返回值提交给：`input(credential)`
 3. 校验浏览器凭证：`verify(passkey)`，提交 `input`、`state` 和调用方保存状态的 `state_key`
 4. 返回 `Done`
 ```
 
-`issue(webauthn)` 只生成浏览器需要的选项和 state；它不是校验。`verify(passkey)` 才会验证签名、浏览器返回的请求数据、凭证 ID 和计数器，并把新的计数器交给 `Passkeys::update` 保存。两个步骤由不同的 Passkey 类型提供。
+`issue(passkey)` 只生成浏览器需要的选项和 state；它不是校验。`verify(passkey)` 才会验证签名、浏览器返回的请求数据、凭证 ID 和计数器，并把新的计数器交给 `Passkeys::update` 保存。两个步骤由不同的 Passkey 类型提供。
 
 调用方负责：
 
 1. 先完成用户身份确认。
-2. 通过 `issue(webauthn)` 获取浏览器选项和 state。
+2. 通过 `issue(passkey)` 获取浏览器选项和 state。
 3. 把 state 短期保存到 `Secrets`。
 4. 接收浏览器 Passkey 响应后提交给 `verify_once(passkey)`，让 bridge 用 `Secrets::take_if` 原子消费状态。使用默认 `Services` 时，Passkey 校验节点也必须提供 `state_key`。
 5. 通过 `Passkeys::update` 做计数器条件更新。
 
-因此，`issue(webauthn)` 的结果需要返回给浏览器，浏览器返回的 credential 再由调用方提交给 `input(credential)`；这两个请求之间的 state 由调用方短期保存。直接使用 `verify` 或 `register` 时，调用方必须自己完成同样的单次消费；更安全的入口是 `verify_once` 和 `register_once`。
+因此，`issue(passkey)` 的结果需要返回给浏览器，浏览器返回的 credential 再由调用方提交给 `input(credential)`；这两个请求之间的 state 由调用方短期保存。直接使用 `verify` 或 `register` 时，调用方必须自己完成同样的单次消费；更安全的入口是 `verify_once` 和 `register_once`。
 
 bridge 不保存浏览器 Session，也不决定一个用户是否必须启用 Passkey。
 

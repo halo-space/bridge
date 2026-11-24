@@ -72,11 +72,8 @@ impl Table {
                 "captcha.rotate",
                 "captcha.click",
                 "sms",
-                "code.sms",
                 "email",
-                "code.email",
                 "passkey",
-                "webauthn",
             ],
             Handler::Issue,
         );
@@ -89,16 +86,13 @@ impl Table {
                 "captcha.rotate",
                 "captcha.click",
                 "sms",
-                "code.sms",
                 "email",
-                "code.email",
                 "totp",
                 "password",
                 "account.password",
                 "email.password",
                 "phone.password",
                 "passkey",
-                "webauthn",
                 "device",
             ],
             Handler::Verify,
@@ -107,7 +101,6 @@ impl Table {
             Slot::Effect,
             &[
                 "audit",
-                "auth.success",
                 "auth.failed",
                 "mfa.challenge",
                 "mfa.passed",
@@ -119,15 +112,7 @@ impl Table {
         );
         table.add(
             Slot::Effect,
-            &[
-                "sms",
-                "email",
-                "sms.send",
-                "email.send",
-                "send",
-                "send.sms",
-                "send.email",
-            ],
+            &["sms", "email", "sms.send", "email.send"],
             Handler::Send,
         );
         table
@@ -377,9 +362,9 @@ fn identity_pass(user: User) -> Output {
 }
 
 fn channel(kind: &str) -> Result<&'static str> {
-    if kind == "sms" || kind == "code.sms" {
+    if kind == "sms" {
         Ok("sms")
-    } else if kind == "email" || kind == "code.email" {
+    } else if kind == "email" {
         Ok("email")
     } else {
         Err(Error::Unsupported(format!(
@@ -391,7 +376,7 @@ fn channel(kind: &str) -> Result<&'static str> {
 fn is_passkey(kind: &Kind) -> bool {
     matches!(
         kind,
-        Kind::Issue(code) | Kind::Verify(code) if matches!(code.as_str(), "passkey" | "webauthn")
+        Kind::Issue(code) | Kind::Verify(code) if code == "passkey"
     )
 }
 
